@@ -1,0 +1,10 @@
+[package]
+name = "terrabeam"
+description = "One-command runner for Beam models: llama.cpp + engram library behind an OpenAI endpoint"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+engram = { path = "../engram" }
+anyhow = "1"

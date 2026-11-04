@@ -1,0 +1,22 @@
+[package]
+name = "engram"
+description = "Engram retrieval: faiss IVF-SQ8 OnDisk reader, tantivy BM25, parquet passages, static embeddings, cross-encoder rerank"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow = "1"
+memmap2 = "0.9"
+rayon = "1"
+parquet = { version = "57", default-features = false, features = ["arrow", "snap", "zstd", "lz4"] }
+arrow-array = "57"
+tokenizers = { version = "0.22", default-features = false, features = ["onig"] }
+safetensors = "0.6"
+tantivy = "0.26"
+lru = "0.16"
+candle-core = "0.11"
+candle-nn = "0.11"
+candle-transformers = "0.11"
+serde_json = "1"
+ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "download-binaries", "tls-native", "api-31"] }
