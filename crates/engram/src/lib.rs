@@ -102,23 +102,48 @@ impl Engram {
         Ok(Hit { table: c.table.clone(), pid: c.pid, first: c.first, lexical: c.lexical, score: None, passage: p })
     }
 
-    /// engram.py `retrieve`: hybrid candidates -> passages -> cross-encoder re-rank against q -> top k.
+    /// Confident lane (Rig sidecar): vector hits only, `max(2, ncand / n_tables)` per table; Some(top k) when the best inner
+    /// product is >= `confident_at`, else None. Runs before BM25 and the re-rank, so a confident query costs one IVF pass.
+    pub fn retrieve_fast(&self, q: &str, k: usize, tables: &[&str]) -> Result<Option<Vec<Hit>>> {
+        if self.confident_at <= 0.0 || self.rerank.is_none() {
+            return Ok(None);
+        }
+        let qv = self.embed.embed(q)?;
+        let ts: Vec<&Table> = tables.iter().filter_map(|t| self.tables.get(*t)).collect();
+        if ts.is_empty() {
+            return Ok(None);
+        }
+        let per = (self.ncand / ts.len()).max(2);
+        let mut best: Vec<Candidate> = Vec::new();
+        for t in &ts {
+            for (s, id) in t.ivf.search(&qv, per, self.nprobe) {
+                if id >= 0 {
+                    best.push(Candidate { table: t.name.clone(), pid: id, first: s, lexical: false });
+                }
+            }
+        }
+        if best.iter().map(|c| c.first).fold(f32::MIN, f32::max) < self.confident_at {
+            return Ok(None);
+        }
+        best.sort_by(|a, b| b.first.total_cmp(&a.first));
+        best.truncate(k);
+        Ok(Some(best.iter().map(|c| self.fetch(c)).collect::<Result<Vec<_>>>()?))
+    }
+
+    /// engram.py `retrieve` (after the confident lane): hybrid candidates -> passages -> cross-encoder re-rank -> top k.
     pub fn retrieve(&self, q: &str, k: usize, tables: &[&str]) -> Result<Vec<Hit>> {
+        if let Some(h) = self.retrieve_fast(q, k, tables)? {
+            return Ok(h);
+        }
         let cand = self.candidates(q, self.ncand, tables)?;
         let mut hits = cand.iter().map(|c| self.fetch(c)).collect::<Result<Vec<_>>>()?;
-        if let Some(ce) = &self.rerank {
-            let best_vec = cand.iter().filter(|c| !c.lexical).map(|c| c.first).fold(f32::MIN, f32::max);
-            if self.confident_at > 0.0 && best_vec >= self.confident_at {
-                hits.retain(|h| !h.lexical);
-                hits.sort_by(|a, b| b.first.total_cmp(&a.first));
-            } else if !hits.is_empty() {
-                let texts: Vec<&str> = hits.iter().map(|h| h.passage.text.as_str()).collect();
-                let sc = ce.score(q, &texts)?;
-                for (h, s) in hits.iter_mut().zip(sc) {
-                    h.score = Some(s);
-                }
-                hits.sort_by(|a, b| b.score.unwrap().total_cmp(&a.score.unwrap()));
+        if let (Some(ce), false) = (&self.rerank, hits.is_empty()) {
+            let texts: Vec<&str> = hits.iter().map(|h| h.passage.text.as_str()).collect();
+            let sc = ce.score(q, &texts)?;
+            for (h, s) in hits.iter_mut().zip(sc) {
+                h.score = Some(s);
             }
+            hits.sort_by(|a, b| b.score.unwrap().total_cmp(&a.score.unwrap()));
         }
         hits.truncate(k);
         Ok(hits)
