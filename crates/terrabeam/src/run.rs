@@ -65,6 +65,9 @@ pub struct RunArgs {
     /// ignore GPUs: CPU llama.cpp build, quant chosen for RAM
     #[arg(long)]
     pub cpu: bool,
+    /// show what would be downloaded and run, then exit
+    #[arg(long)]
+    pub dry_run: bool,
     #[arg(long)]
     pub ctx: Option<u32>,
     #[arg(long, default_value = "main")]
@@ -193,6 +196,18 @@ pub async fn run(a: RunArgs) -> Result<()> {
         Some(n) => m.quant(n).with_context(|| format!("no quant {n} (have: {})", m.quants.iter().map(|q| q.name.as_str()).collect::<Vec<_>>().join(", ")))?.clone(),
         None => pick_quant(&m, &h).clone(),
     };
+    if a.dry_run {
+        let spec = m.engram.clone().unwrap_or_default();
+        let (format, k) = fmt_of(&a.lib, &spec);
+        println!("model:    {}\nquant:    {} ({}, {:.2} GB){}\nquants:   {}\nllama.cpp {} ({})\nengram:   {}\nmemory:   {:?}",
+            m.name, q.name, q.file, q.bytes as f64 / 1e9,
+            if m.mtp.is_some() && !a.no_mtp && !matches!(h.accel, hw::Accel::Cpu) { " + MTP draft" } else { "" },
+            m.quants.iter().map(|x| format!("{}{}", x.name, if x.auto { "" } else { "*" })).collect::<Vec<_>>().join(", "),
+            if m.llama_cpp.is_empty() { DEFAULT_LLAMA_TAG } else { &m.llama_cpp }, hw::llama_assets(&h, if m.llama_cpp.is_empty() { DEFAULT_LLAMA_TAG } else { &m.llama_cpp }).join(" + "),
+            if a.lib.no_engram { "off".to_string() } else { format!("pack {} , {:?} format, k {}", a.lib.pack.clone().unwrap_or(spec.default_pack.clone()), format, k) },
+            a.lib.memory);
+        return Ok(());
+    }
     let gguf = files.get(&q, &c).await?;
     let gpu = matches!(h.accel, hw::Accel::Cuda { .. } | hw::Accel::Metal | hw::Accel::Vulkan);
     let mtp = match (&m.mtp, gpu && !a.no_mtp) {
