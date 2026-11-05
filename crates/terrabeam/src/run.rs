@@ -201,13 +201,23 @@ pub async fn run(a: RunArgs) -> Result<()> {
         m.name, px.model,
         if px.eg.is_some() { format!("on, {} tables ({}), {} passages per question", tables.len(), tables.join(","), k) } else { "off".into() }
     );
-    tokio::select! {
-        r = axum::serve(l, app) => { r?; }
-        _ = tokio::signal::ctrl_c() => { eprintln!("terrabeam: stopping"); }
-        st = child.wait() => { bail!("llama-server exited: {:?}", st?); }
+    let res = tokio::select! {
+        r = axum::serve(l, app) => r.map_err(anyhow::Error::from),
+        _ = shutdown_signal() => { eprintln!("terrabeam: stopping"); Ok(()) }
+        st = child.wait() => Err(anyhow::anyhow!("llama-server exited: {:?}", st)),
+    };
+    child.kill().await.ok();   // also on SIGTERM: a killed runner must not leave its llama-server behind
+    res
+}
+
+async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).expect("SIGTERM handler");
+        tokio::select! { _ = tokio::signal::ctrl_c() => {}, _ = term.recv() => {} }
     }
-    child.kill().await.ok();
-    Ok(())
+    #[cfg(not(unix))]
+    tokio::signal::ctrl_c().await.ok();
 }
 
 /// Best quant that fits: on a GPU the best one that fits in VRAM with ~1.5 GB for KV/compute, else Q4_K_M (hybrid/CPU);
