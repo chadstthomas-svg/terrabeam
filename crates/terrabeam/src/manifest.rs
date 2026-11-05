@@ -23,6 +23,12 @@ pub struct Manifest {
     pub engram: Option<EngramSpec>,
 }
 
+impl Default for EngramSpec {
+    fn default() -> Self {
+        EngramSpec { default_pack: default_pack(), packs: BTreeMap::new(), format: "sources".into(), k: 3, ncand: default_ncand(), nprobe: default_nprobe() }
+    }
+}
+
 fn default_ctx() -> u32 {
     32768
 }
@@ -59,10 +65,11 @@ fn default_nmax() -> u32 {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct EngramSpec {
-    /// HF dataset repo holding the packs
-    pub repo: String,
+    /// pack from the terrabeam registry (lite / standard / full ...)
+    #[serde(default = "default_pack")]
     pub default_pack: String,
-    /// pack name -> its folder in the dataset repo and its tables (layout = engram root: wiki at the top, others tables/<name>)
+    /// optional: this model's own table list per pack name (overrides the registry's list for that name)
+    #[serde(default)]
     pub packs: BTreeMap<String, Pack>,
     /// injection layout the model was trained on ("tablinum") or generic source blocks ("sources")
     #[serde(default = "default_format")]
@@ -75,6 +82,9 @@ pub struct EngramSpec {
     pub nprobe: usize,
 }
 
+fn default_pack() -> String {
+    "lite".into()
+}
 fn default_format() -> String {
     "tablinum".into()
 }
@@ -87,10 +97,8 @@ fn default_ncand() -> usize {
 fn default_nprobe() -> usize {
     128
 }
-
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Pack {
-    pub path: String,
     pub tables: Vec<String>,
     #[serde(default)]
     pub bytes: u64,

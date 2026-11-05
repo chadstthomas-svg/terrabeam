@@ -4,6 +4,10 @@ mod fetch;
 mod hw;
 mod inject;
 mod manifest;
+mod mcp;
+mod memory;
+mod packs;
+mod proxy;
 mod run;
 
 use anyhow::{Context, Result};
@@ -30,8 +34,14 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Run a Beam model: right GGUF for this machine + llama.cpp + engram library behind an OpenAI endpoint
+    /// Run a model (a Tablinum repo, any Hugging Face GGUF repo, or a local .gguf) with the engram library behind an OpenAI endpoint
     Run(run::RunArgs),
+    /// Put the engram (and memory) in front of a server you already run: Ollama, LM Studio, vLLM, llama.cpp, a cloud API
+    Proxy(run::ProxyArgs),
+    /// The engram as an MCP server on stdio (Claude Code, Claude Desktop, Cursor, Cline, opencode ...)
+    Mcp(mcp::McpArgs),
+    /// Download an engram pack ahead of time: terrabeam pack lite
+    Pack { name: String },
     /// Engram retrieval service: GET /health, GET /search?q=&k=&tables=, POST /inject
     Serve(ServeArgs),
 }
@@ -92,6 +102,15 @@ fn err(code: StatusCode, msg: impl Into<String>) -> Response {
 async fn main() -> Result<()> {
     match Cli::parse().cmd {
         Cmd::Run(a) => run::run(a).await,
+        Cmd::Proxy(a) => run::proxy_cmd(a).await,
+        Cmd::Mcp(a) => mcp::mcp(a).await,
+        Cmd::Pack { name } => {
+            let c = fetch::client();
+            let reg = packs::registry(&c).await;
+            let (root, ts) = packs::ensure_pack(&c, &fetch::home(), &reg, &name).await?;
+            eprintln!("pack {name}: {} tables in {}", ts.len(), root.display());
+            Ok(())
+        }
         Cmd::Serve(a) => serve(a).await,
     }
 }
