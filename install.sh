@@ -17,7 +17,8 @@ if [ "$os" = Linux ]; then
   g=$(ldd --version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+$' || echo 0.0)
   if [ "$(printf '%s\n2.38\n' "$g" | sort -V | head -1)" != "2.38" ]; then t="$t-compat"; echo "terrabeam: glibc $g, using the compatible build"; fi
 fi
-tag=${TERRABEAM_VERSION:-$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)}
+# newest release, including previews (GitHub's /releases/latest skips pre-releases)
+tag=${TERRABEAM_VERSION:-$(curl -fsSL "https://api.github.com/repos/$REPO/releases?per_page=1" | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)}
 [ -n "$tag" ] || { echo "terrabeam: could not find the latest release" >&2; exit 1; }
 f="terrabeam-$tag-$t.tar.gz"; tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 echo "terrabeam: downloading $f"

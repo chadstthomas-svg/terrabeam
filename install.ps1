@@ -3,7 +3,7 @@
 $ErrorActionPreference = "Stop"
 $repo = "chadstthomas-svg/terrabeam"
 $t = "x86_64-pc-windows-msvc"   # also runs on Windows on ARM (x64 emulation)
-$tag = if ($env:TERRABEAM_VERSION) { $env:TERRABEAM_VERSION } else { (Invoke-RestMethod "https://api.github.com/repos/$repo/releases/latest").tag_name }
+$tag = if ($env:TERRABEAM_VERSION) { $env:TERRABEAM_VERSION } else { (Invoke-RestMethod "https://api.github.com/repos/$repo/releases?per_page=1")[0].tag_name }
 $f = "terrabeam-$tag-$t.zip"
 $dir = Join-Path $env:LOCALAPPDATA "terrabeam"; New-Item -ItemType Directory -Force -Path $dir | Out-Null
 $zip = Join-Path $env:TEMP $f
