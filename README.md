@@ -24,7 +24,7 @@ curl -fsSL https://raw.githubusercontent.com/chadstthomas-svg/terrabeam/master/i
 # Windows (PowerShell)
 irm https://raw.githubusercontent.com/chadstthomas-svg/terrabeam/master/install.ps1 | iex
 
-# or from source (Rust 1.85+)
+# or from source (Rust 1.85+; on Linux older than glibc 2.38 add --no-default-features)
 cargo install --git https://github.com/chadstthomas-svg/terrabeam terrabeam
 ```
 

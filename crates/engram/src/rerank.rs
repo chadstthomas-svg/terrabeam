@@ -14,6 +14,7 @@ use tokenizers::{Tokenizer, TruncationDirection, TruncationParams, TruncationStr
 
 enum Backend {
     Candle { bert: BertModel, pooler: Linear, classifier: Linear, dev: Device },
+    #[cfg(feature = "ort")]
     Ort(std::sync::Mutex<ort::session::Session>, #[allow(dead_code)] ort::environment::Environment), // env kept alive with the session
 }
 
@@ -33,6 +34,9 @@ impl CrossEncoder {
     pub fn open_with(dir: &Path, prefer_ort: bool, threads: usize) -> Result<Self> {
         let tok = Self::tokenizer(dir)?;
         let onnx = dir.join("onnx/model.onnx");
+        #[cfg(not(feature = "ort"))]
+        let _ = (prefer_ort, threads, &onnx);
+        #[cfg(feature = "ort")]
         if prefer_ort && onnx.exists() {
             use ort::session::builder::GraphOptimizationLevel;
             let env = ort::init().with_name("terrabeam").with_telemetry(false).build().map_err(|e| anyhow::anyhow!("ort env: {e}"))?;
@@ -58,6 +62,7 @@ impl CrossEncoder {
     pub fn backend_name(&self) -> &'static str {
         match self.backend {
             Backend::Candle { .. } => "candle",
+            #[cfg(feature = "ort")]
             Backend::Ort(..) => "onnxruntime",
         }
     }
@@ -85,6 +90,7 @@ impl CrossEncoder {
                 let pooled = pooler.forward(&h.i((.., 0, ..))?)?.tanh()?;
                 Ok(classifier.forward(&pooled)?.squeeze(1)?.to_vec1::<f32>()?)
             }
+            #[cfg(feature = "ort")]
             Backend::Ort(sess, _) => {
                 use ort::value::Tensor as OT;
                 let mk = |v: Vec<i64>| OT::from_array(([b, l], v)).map_err(|e| anyhow::anyhow!("{e}"));

@@ -6,7 +6,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-engram = { path = "../engram" }
+engram = { path = "../engram", default-features = false }
 anyhow = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "process", "fs", "io-util", "io-std", "time"] }
 axum = "0.8"
@@ -23,3 +23,7 @@ sha2 = "0.10"
 hex = "0.4"
 dirs = "6"
 bytes = "1"
+
+[features]
+default = ["ort"]
+ort = ["engram/ort"]

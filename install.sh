@@ -12,6 +12,11 @@ case "$os-$arch" in
   Darwin-x86_64) t=x86_64-apple-darwin ;;
   *) echo "terrabeam: no prebuilt binary for $os-$arch; try: cargo install --git https://github.com/$REPO terrabeam" >&2; exit 1 ;;
 esac
+# Linux: the standard build needs glibc 2.38+ (Ubuntu 24.04, Debian 13, Fedora 39 or newer); older systems get the -compat build
+if [ "$os" = Linux ]; then
+  g=$(ldd --version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+$' || echo 0.0)
+  if [ "$(printf '%s\n2.38\n' "$g" | sort -V | head -1)" != "2.38" ]; then t="$t-compat"; echo "terrabeam: glibc $g, using the compatible build"; fi
+fi
 tag=${TERRABEAM_VERSION:-$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)}
 [ -n "$tag" ] || { echo "terrabeam: could not find the latest release" >&2; exit 1; }
 f="terrabeam-$tag-$t.tar.gz"; tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
