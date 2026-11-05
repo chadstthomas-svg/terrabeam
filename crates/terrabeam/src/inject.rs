@@ -27,14 +27,11 @@ pub struct Src<'a> {
     pub text: &'a str,
 }
 
-/// The text of the last message if it is a user turn that has not been injected already (else None: tool results, assistant
-/// prefills, or a client that already added passages are left alone).
-pub fn last_user_text(messages: &[Value]) -> Option<String> {
-    let m = messages.last()?;
-    if m.get("role")?.as_str()? != "user" {
-        return None;
-    }
-    let t = match m.get("content")? {
+/// Index of the last user message, if it has not been injected already. Tool results and assistant turns AFTER it are fine:
+/// in an agent loop every call of the turn re-sends that user message, and it gets the same passages each time.
+pub fn last_user(messages: &[Value]) -> Option<(usize, String)> {
+    let i = messages.iter().rposition(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))?;
+    let t = match messages[i].get("content")? {
         Value::String(s) => s.clone(),
         Value::Array(parts) => parts
             .iter()
@@ -47,7 +44,7 @@ pub fn last_user_text(messages: &[Value]) -> Option<String> {
     if t.trim().is_empty() || t.starts_with(V1_HEAD) || t.starts_with(SOURCES_HEAD) {
         return None;
     }
-    Some(t)
+    Some((i, t))
 }
 
 pub fn render(format: Format, q: &str, srcs: &[Src], nonce: &str) -> String {
@@ -69,10 +66,10 @@ pub fn render(format: Format, q: &str, srcs: &[Src], nonce: &str) -> String {
     }
 }
 
-/// Replace the last user turn's text with `new_text` (string content -> string; parts -> one text part where the first text
-/// part was, other parts such as images kept in place).
-pub fn replace_last_user_text(messages: &mut [Value], new_text: String) {
-    let Some(m) = messages.last_mut() else { return };
+/// Replace message `i`'s text with `new_text` (string content -> string; parts -> one text part where the first text part
+/// was, other parts such as images kept in place).
+pub fn replace_text(messages: &mut [Value], i: usize, new_text: String) {
+    let Some(m) = messages.get_mut(i) else { return };
     match m.get_mut("content") {
         Some(Value::Array(parts)) => {
             let mut put = false;
@@ -132,11 +129,13 @@ rule or case does not answer it: then rely on your own knowledge, or say you don
     }
 
     #[test]
-    fn skips_tool_turns_and_already_injected() {
-        let tool = serde_json::json!([{"role": "user", "content": "x"}, {"role": "tool", "content": "r"}]);
-        assert!(last_user_text(tool.as_array().unwrap()).is_none());
+    fn finds_the_user_turn_behind_tool_results_and_skips_injected() {
+        let tool = serde_json::json!([{"role": "user", "content": "x"}, {"role": "assistant", "content": null}, {"role": "tool", "content": "r"}]);
+        assert_eq!(last_user(tool.as_array().unwrap()), Some((0, "x".to_string())));
         let inj = serde_json::json!([{"role": "user", "content": format!("{V1_HEAD}[1] a")}]);
-        assert!(last_user_text(inj.as_array().unwrap()).is_none());
+        assert!(last_user(inj.as_array().unwrap()).is_none());
+        let none = serde_json::json!([{"role": "system", "content": "s"}]);
+        assert!(last_user(none.as_array().unwrap()).is_none());
     }
 
     #[test]
@@ -144,8 +143,8 @@ rule or case does not answer it: then rely on your own knowledge, or say you don
         let mut m = serde_json::json!([{"role": "user", "content": [{"type": "image_url", "image_url": {"url": "u"}},
             {"type": "text", "text": "a"}, {"type": "text", "text": "b"}]}]);
         let msgs = m.as_array_mut().unwrap();
-        assert_eq!(last_user_text(msgs).unwrap(), "a\nb");
-        replace_last_user_text(msgs, "NEW".into());
+        assert_eq!(last_user(msgs).unwrap(), (0, "a\nb".to_string()));
+        replace_text(msgs, 0, "NEW".into());
         let parts = msgs[0]["content"].as_array().unwrap();
         assert_eq!(parts.len(), 2);
         assert_eq!(parts[1]["text"], "NEW");

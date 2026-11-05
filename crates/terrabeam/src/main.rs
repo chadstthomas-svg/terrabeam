@@ -1,6 +1,10 @@
 //! terrabeam - one-command runner + engram service for Beam models. See DESIGN.md.
-//! Implemented so far: `serve` (engram service; drop-in for Rig's router/engram_serve.py + POST /inject).
+//! `run` (one-command model runner) and `serve` (engram service; drop-in for Rig's router/engram_serve.py + POST /inject).
+mod fetch;
+mod hw;
 mod inject;
+mod manifest;
+mod run;
 
 use anyhow::{Context, Result};
 use axum::extract::{Query, State};
@@ -26,6 +30,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
+    /// Run a Beam model: right GGUF for this machine + llama.cpp + engram library behind an OpenAI endpoint
+    Run(run::RunArgs),
     /// Engram retrieval service: GET /health, GET /search?q=&k=&tables=, POST /inject
     Serve(ServeArgs),
 }
@@ -85,6 +91,7 @@ fn err(code: StatusCode, msg: impl Into<String>) -> Response {
 #[tokio::main]
 async fn main() -> Result<()> {
     match Cli::parse().cmd {
+        Cmd::Run(a) => run::run(a).await,
         Cmd::Serve(a) => serve(a).await,
     }
 }
@@ -259,8 +266,8 @@ fn default_k() -> usize {
 
 /// POST /inject {messages, format: tablinum|sources, k, tables} -> {messages, injected, sources, path, took_ms}
 async fn inject_h(State(st): State<S>, Json(mut r): Json<InjectReq>) -> Response {
-    let Some(q) = inject::last_user_text(&r.messages) else {
-        return Json(json!({"messages": r.messages, "injected": false, "reason": "last message is not an un-injected user turn"})).into_response();
+    let Some((ui, q)) = inject::last_user(&r.messages) else {
+        return Json(json!({"messages": r.messages, "injected": false, "reason": "no un-injected user message"})).into_response();
     };
     let eg = match engine(&st) {
         Ok(e) => e,
@@ -279,9 +286,9 @@ async fn inject_h(State(st): State<S>, Json(mut r): Json<InjectReq>) -> Response
     }
     let srcs: Vec<inject::Src> = hits.iter().map(|h| inject::Src { table: &h.table, title: &h.passage.title, text: &h.passage.text }).collect();
     let text = inject::render(r.format, &q, &srcs, &inject::new_nonce());
-    inject::replace_last_user_text(&mut r.messages, text);
+    inject::replace_text(&mut r.messages, ui, text);
     Json(json!({
-        "messages": r.messages, "injected": true, "format": r.format, "path": path, "took_ms": ms,
+        "messages": r.messages, "injected": true, "index": ui, "text": r.messages[ui]["content"].clone(), "format": r.format, "path": path, "took_ms": ms,
         "sources": hits.iter().map(|h| json!({"table": h.table, "pid": h.pid, "title": h.passage.title, "score": h.score})).collect::<Vec<_>>(),
     }))
     .into_response()
