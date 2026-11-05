@@ -34,6 +34,13 @@ pub struct Quant {
     pub bytes: u64,
     #[serde(default)]
     pub sha256: Option<String>,
+    /// false = only on request (--quant), e.g. BF16 when Q8_0 has the same KLD at half the size
+    #[serde(default = "yes")]
+    pub auto: bool,
+}
+
+fn yes() -> bool {
+    true
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

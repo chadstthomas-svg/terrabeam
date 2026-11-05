@@ -228,14 +228,14 @@ fn pick_quant<'a>(m: &'a Manifest, h: &hw::Hw) -> &'a crate::manifest::Quant {
     let in_ram = |b: u64| mib(b) * 2 <= h.ram_mib;
     if h.vram_mib() > 0 {
         let budget = (h.vram_mib() * 85 / 100).saturating_sub(1536);
-        if let Some(q) = m.quants.iter().find(|q| mib(q.bytes) <= budget) {
+        if let Some(q) = m.quants.iter().filter(|q| q.auto).find(|q| mib(q.bytes) <= budget) {
             return q;
         }
     }
     if let Some(q) = q4.filter(|q| in_ram(q.bytes)) {
         return q;
     }
-    m.quants.iter().find(|q| in_ram(q.bytes)).unwrap_or_else(|| m.quants.last().expect("manifest has no quants"))
+    m.quants.iter().filter(|q| q.auto).find(|q| in_ram(q.bytes)).unwrap_or_else(|| m.quants.last().expect("manifest has no quants"))
 }
 
 async fn fetch_model_file(c: &reqwest::Client, a: &RunArgs, local: Option<&Path>, mdir: &Path, file: &str, size: Option<u64>, sha: Option<&str>) -> Result<PathBuf> {
