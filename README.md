@@ -87,7 +87,7 @@ terrabeam run tablinum/Moon-Beam-8B-A1B-GGUF-Preview --memory long-term
 ```
 
 With memory on, terrabeam saves short notes of your questions and the answers. When a later question relates to them, it
-adds the matching notes to the system prompt. This is the same memory as Rig's.
+adds the matching notes to the system prompt.
 
 - **Modes:**
   - `session`: this conversation only, useful when an app trims long chats;
