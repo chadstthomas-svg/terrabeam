@@ -1,0 +1,53 @@
+name: release
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: write
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-22.04,     target: x86_64-unknown-linux-gnu,  ext: tar.gz }
+          - { os: ubuntu-22.04-arm, target: aarch64-unknown-linux-gnu, ext: tar.gz }
+          - { os: macos-14,         target: aarch64-apple-darwin,      ext: tar.gz }
+          - { os: macos-15-intel,   target: x86_64-apple-darwin,       ext: tar.gz }
+          - { os: windows-2022,     target: x86_64-pc-windows-msvc,    ext: zip }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - name: build
+        run: cargo build --release --locked -p terrabeam --target ${{ matrix.target }}
+      - name: package (unix)
+        if: matrix.ext == 'tar.gz'
+        shell: bash
+        run: |
+          f=terrabeam-${GITHUB_REF_NAME}-${{ matrix.target }}.tar.gz
+          cp target/${{ matrix.target }}/release/terrabeam .
+          tar -czf $f terrabeam LICENSE README.md
+          (command -v sha256sum >/dev/null && sha256sum $f || shasum -a 256 $f) > $f.sha256
+          echo "ASSET=$f" >> $GITHUB_ENV
+      - name: package (windows)
+        if: matrix.ext == 'zip'
+        shell: pwsh
+        run: |
+          $f = "terrabeam-$env:GITHUB_REF_NAME-${{ matrix.target }}.zip"
+          Copy-Item target/${{ matrix.target }}/release/terrabeam.exe .
+          Compress-Archive -Path terrabeam.exe, LICENSE, README.md -DestinationPath $f
+          "$((Get-FileHash $f -Algorithm SHA256).Hash.ToLower())  $f" | Out-File -Encoding ascii "$f.sha256"
+          "ASSET=$f" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+      - name: upload
+        uses: softprops/action-gh-release@v2
+        with:
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          files: |
+            ${{ env.ASSET }}
+            ${{ env.ASSET }}.sha256

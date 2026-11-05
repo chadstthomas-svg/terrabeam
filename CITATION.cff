@@ -1,0 +1,12 @@
+cff-version: 1.2.0
+message: "If terrabeam or the Tablinum research helps your work, please credit it. Thank you!"
+title: "terrabeam: run any model with the Tablinum knowledge library attached"
+type: software
+authors:
+  - name: "Tablinum"
+    website: "https://huggingface.co/tablinum"
+repository-code: "https://github.com/chadstthomas-svg/terrabeam"
+license: MIT
+version: 0.1.0
+date-released: 2026-11-05
+keywords: [retrieval-augmented generation, llama.cpp, local LLM, knowledge library, engram, MCP]

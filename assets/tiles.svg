@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="156" viewBox="-12 -12 984 156" role="img" aria-label="one command; any GGUF; open library; MIT">
+<rect x="-12" y="-12" width="984" height="156" rx="16" fill="#0d0b2a"/>
+<rect x="0.5" y=".5" width="227" height="131" rx="12" fill="#ffffff" fill-opacity=".055" stroke="#bec6ff" stroke-opacity=".22"/>
+<text x="16" y="44" font-family="Inter,ui-sans-serif,system-ui,'Segoe UI',Roboto,sans-serif" font-size="28" font-weight="800" fill="#4fe6cc">1<tspan fill="#ffffff" dx="9">command</tspan></text>
+<text y="74" font-family="Inter,ui-sans-serif,system-ui,'Segoe UI',Roboto,sans-serif" font-size="12.5" fill="#968cd2"><tspan x="16" dy="0">installs the model, its library</tspan><tspan x="16" dy="16">and llama.cpp, then serves</tspan><tspan x="16" dy="16">http://127.0.0.1:8080/v1</tspan></text>
+<rect x="244.5" y=".5" width="227" height="131" rx="12" fill="#ffffff" fill-opacity=".055" stroke="#bec6ff" stroke-opacity=".22"/>
+<text x="260" y="44" font-family="Inter,ui-sans-serif,system-ui,'Segoe UI',Roboto,sans-serif" font-size="28" font-weight="800" fill="#4fe6cc">any<tspan fill="#ffffff" dx="9">GGUF</tspan></text>
+<text y="74" font-family="Inter,ui-sans-serif,system-ui,'Segoe UI',Roboto,sans-serif" font-size="12.5" fill="#968cd2"><tspan x="260" dy="0">Tablinum models, or any GGUF on</tspan><tspan x="260" dy="16">Hugging Face; or put the library</tspan><tspan x="260" dy="16">in front of Ollama, LM Studio or</tspan><tspan x="260" dy="16">vLLM</tspan></text>
+<rect x="488.5" y=".5" width="227" height="131" rx="12" fill="#ffffff" fill-opacity=".055" stroke="#bec6ff" stroke-opacity=".22"/>
+<text x="504" y="44" font-family="Inter,ui-sans-serif,system-ui,'Segoe UI',Roboto,sans-serif" font-size="28" font-weight="800" fill="#4fe6cc">open<tspan fill="#ffffff" dx="9">library</tspan></text>
+<text y="74" font-family="Inter,ui-sans-serif,system-ui,'Segoe UI',Roboto,sans-serif" font-size="12.5" fill="#968cd2"><tspan x="504" dy="0">Tablinum-2: Wikipedia, law,</tspan><tspan x="504" dy="16">software docs, Stack Exchange,</tspan><tspan x="504" dy="16">regulations, textbooks; searched</tspan><tspan x="504" dy="16">offline</tspan></text>
+<rect x="732.5" y=".5" width="227" height="131" rx="12" fill="#ffffff" fill-opacity=".055" stroke="#bec6ff" stroke-opacity=".22"/>
+<text x="748" y="44" font-family="Inter,ui-sans-serif,system-ui,'Segoe UI',Roboto,sans-serif" font-size="28" font-weight="800" fill="#4fe6cc">MIT<tspan fill="#ffffff"></tspan></text>
+<text y="74" font-family="Inter,ui-sans-serif,system-ui,'Segoe UI',Roboto,sans-serif" font-size="12.5" fill="#968cd2"><tspan x="748" dy="0">free to use and build on; keep the</tspan><tspan x="748" dy="16">notice, a thank-you is appreciated</tspan></text>
+</svg>

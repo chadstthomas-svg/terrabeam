@@ -1,53 +1,136 @@
-# terrabeam
+<p align="center"><img src="assets/hero.svg" alt="terrabeam: any model, with the library attached" width="100%"></p>
+<p align="center"><img src="assets/tiles.svg" alt="1 command · any GGUF · open library · MIT" width="100%"></p>
 
-terrabeam runs a Beam model the way it is meant to be run, with one command. It picks the right GGUF for the machine,
-starts a pinned upstream llama.cpp build, attaches the model's engram knowledge library, and serves an OpenAI-compatible
-endpoint.
+**terrabeam** runs a language model on your own computer and connects it to the
+[Tablinum](https://huggingface.co/tablinum) knowledge library and a persistent memory. Everything sits behind an ordinary
+OpenAI-style endpoint, so it works with the apps you already use.
+
+When you ask a question, terrabeam searches the library (Wikipedia, case law, software documentation, Stack Exchange,
+regulations, open textbooks), passes the three best passages to the model, and the model answers from them. Tablinum
+models are trained to read those passages and to say so when they don't contain the answer. Any other model gets the
+same passages as clearly marked sources.
+
+> **Preview.** The Moon-Beam 8B release and these tools are `-Preview` while Tablinum-3 (the next library) is being built
+> and tested. Everything here runs on Tablinum-2 today.
+
+## Quick start
+
+**1. Install**
 
 ```sh
-terrabeam run tablinum/Moon-Beam-8B-A1B-GGUF      # -> http://127.0.0.1:8080/v1
+# Linux / macOS
+curl -fsSL https://raw.githubusercontent.com/chadstthomas-svg/terrabeam/master/install.sh | sh
+
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/chadstthomas-svg/terrabeam/master/install.ps1 | iex
+
+# or from source (Rust 1.85+)
+cargo install --git https://github.com/chadstthomas-svg/terrabeam terrabeam
 ```
 
-> Private preview. Not published yet: no PyPI, crates.io or release binaries. The license is a placeholder (Apache-2.0
-> in Cargo.toml) until it is decided.
+**2. Run a model**
+
+```sh
+terrabeam run tablinum/Moon-Beam-8B-A1B-GGUF-Preview
+```
+
+That one command:
+- picks the right quant for your GPU or CPU;
+- downloads the model, the matching [llama.cpp](https://github.com/ggml-org/llama.cpp) build and the `lite` library pack;
+- serves **http://127.0.0.1:8080/v1**.
+
+Downloads are checked against their SHA256 and resume if interrupted. Later starts take seconds.
+
+**3. Use it** with any OpenAI client:
+
+```sh
+curl http://127.0.0.1:8080/v1/chat/completions -H 'Content-Type: application/json' \
+  -d '{"messages":[{"role":"user","content":"What does PHP json_encode return when it fails?"}]}'
+```
+
+The response header `x-engram-sources` lists the passages the model was given.
+
+## Any model, any app
+
+| You have… | Run | Then point your app at |
+|---|---|---|
+| A Tablinum model | `terrabeam run tablinum/<model>-GGUF-Preview` | `http://127.0.0.1:8080/v1` |
+| Any GGUF on Hugging Face | `terrabeam run unsloth/Qwen3-8B-GGUF` (or a local `.gguf`) | `http://127.0.0.1:8080/v1` |
+| Ollama, LM Studio, vLLM, llama.cpp, a cloud API | `terrabeam proxy --upstream http://127.0.0.1:11434` | `http://127.0.0.1:8090/v1` |
+| Claude Code, Claude Desktop, Cursor, Cline, opencode | `terrabeam mcp` (an MCP tool: `search_library`) | see the guide |
+
+Step-by-step setup for **Open WebUI**, **LM Studio**, **Ollama**, **Claude Code**, **Claude Desktop**, **Cursor**,
+**Continue**, **Cline**, **opencode** and **Python** is in **[docs/harnesses.md](docs/harnesses.md)**.
+
+## The library (engram packs)
+
+| Pack | Size | Tables |
+|---|---|---|
+| `lite` (default) | ~5 GB | software docs, Stack Exchange (STEM, humanities, finance, law), Britannica 1911, US Code, eCFR |
+| `standard` | ~21 GB | lite + case law, open textbooks, CRS reports, EUR-Lex |
+| `full` | ~54 GB | standard + English Wikipedia (when published to Tablinum-2) |
+
+Choose a pack with `--pack standard`, or pick tables with `--tables software,law`. `terrabeam pack lite` downloads a pack
+ahead of time.
+
+Every table keeps its own license (CC BY-SA, CC BY, public domain and others); see
+[Tablinum-2 SOURCES](https://huggingface.co/datasets/tablinum/tablinum-2/blob/main/SOURCES.md). The health tables are not
+redistributable, so they are never included in a pack.
+
+To turn the library off for one request, send `"engram": false` or the header `X-Engram: off`. To run without it, use
+`--no-engram`.
+
+## Memory
+
+```sh
+terrabeam run tablinum/Moon-Beam-8B-A1B-GGUF-Preview --memory long-term
+```
+
+With memory on, terrabeam saves short notes of your questions and the answers. When a later question relates to them, it
+adds the matching notes to the system prompt. This is the same memory as Rig's.
+
+- **Modes:**
+  - `session`: this conversation only, useful when an app trims long chats;
+  - `long-term`: across all your conversations.
+- **Safety:** API keys, passwords and bearer tokens are redacted before anything is saved. Retrieved passages are never
+  saved. Notes are always marked as untrusted reference material, never as instructions.
+- **Managing it:**
+  - notes are plain JSONL under `~/.cache/terrabeam/memory/`;
+  - `GET /memory` lists them, `DELETE /memory` clears them, and `DELETE /memory/<id>` removes one;
+  - to skip memory for one request, send `"memory": false` or the header `X-Memory: off`.
 
 ## Commands
 
-- **`run <hf-repo | local folder>`**
-  - Reads the repo's `tablinum.json` (quants with SHA256, the MTP draft head, the llama.cpp release tag, sampling
-    defaults, engram packs).
-  - Detects CUDA, Metal, Vulkan or CPU.
-  - Downloads only what is missing. Downloads resume and are checked.
-  - Runs llama-server on an internal port, behind a proxy that adds retrieved passages to the last user message in the
-    layout the model was trained on.
-  - Per request: `"engram": false` in the body, or the header `X-Engram: off`.
-  - Debugging: `GET /engram/search?q=`; the response header `x-engram-sources` lists the passages used.
-  - Flags: `--quant`, `--pack`, `--engram-root`, `--tables`, `--no-engram`, `--no-mtp`, `--cpu`, `--ctx`,
-    `--llama-server`. Anything after `--` is passed to llama-server.
-- **`serve`**: the engram as a service.
-  - `GET /health` and `GET /search?q=&k=&tables=`.
-  - `POST /inject` with `{messages, format: tablinum|sources, k, tables}`, which returns the rewritten messages and the
-    sources used.
-  - Runs as Rig's `rig-engram.service`, where the router adds passages for every model.
+| Command | What it does |
+|---|---|
+| `terrabeam run <model>` | Runs a model with the library and memory. Flags: `--quant`, `--pack`, `--tables`, `--memory`, `--no-engram`, `--cpu`, `--ctx`, `--port`, `-- <llama-server args>` |
+| `terrabeam proxy --upstream <url>` | Puts the library and memory in front of a server you already run |
+| `terrabeam mcp` | Runs the library (and `--memory`) as an MCP server on stdio |
+| `terrabeam pack <name>` | Downloads a pack ahead of time |
+| `terrabeam serve` | Runs the library as an HTTP service (`/search`, `/inject`); this is how Rig uses it |
 
-## Crates
+## How it works
 
-- **`crates/engram`**: retrieval in pure Rust. It reads the existing tables as they were built, with no re-export:
-  - a faiss `IVF*_HNSW32,SQ8` + OnDiskInvertedLists reader. Centroids are searched exactly. The ids match faiss when
-    faiss is also given exact centroid search;
-  - tantivy 0.26 BM25;
+- **Retrieval:** pure Rust. It reads the published tables directly:
+  - Faiss IVF-SQ8 indexes;
+  - Tantivy BM25 for the keyword half of each search;
   - parquet passages;
-  - static-retrieval-mrl-en-v1 query keys;
-  - an ms-marco-MiniLM-L6-v2 cross-encoder through onnxruntime fp32, statically linked, with a candle fallback.
-    Top-1 matches torch on 60/60 queries.
-- **`crates/terrabeam`**: the CLI.
+  - static embeddings for the query;
+  - a MiniLM cross-encoder through ONNX Runtime.
 
-## Build
+  Results match the reference Python implementation (rerank top-1 on 60 of 60 test queries), and it runs about 3× faster.
+- **Models:** run by the pinned upstream llama.cpp release. The MTP draft head is used when the model ships one.
+- **Proxy:** adds passages to the last user message:
+  - **Tablinum models:** in the exact layout they were trained on;
+  - **other models:** as clearly marked source blocks.
 
-```sh
-cargo build --release          # one binary; links onnxruntime statically
-cargo test
-```
+  Everything else is passed through unchanged, streaming included.
 
-The parity probes in `crates/engram/examples` compare each stage with the Python stack. See `DESIGN.md` for the design
-and for how terrabeam fits into Rig.
+See [DESIGN.md](DESIGN.md) for details.
+
+## Credit and license
+
+MIT. Use it, change it, ship it. Keep the copyright notice, and if terrabeam or the Tablinum research helps you, a
+mention or a thank-you is appreciated. See [CITATION.cff](CITATION.cff).
+
+Built by [Tablinum](https://huggingface.co/tablinum).
