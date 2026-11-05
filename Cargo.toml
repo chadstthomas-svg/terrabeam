@@ -6,7 +6,7 @@ members = ["crates/engram", "crates/terrabeam"]
 version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
-repository = "https://github.com/tablinum/terrabeam"
+repository = "https://github.com/chadstthomas-svg/terrabeam"
 
 [profile.release]
 lto = "thin"
