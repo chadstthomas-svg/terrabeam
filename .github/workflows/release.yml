@@ -16,8 +16,9 @@ jobs:
           - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu, ext: tar.gz }
           - { os: ubuntu-22.04,     target: x86_64-unknown-linux-gnu,  ext: tar.gz, compat: true }
           - { os: ubuntu-22.04-arm, target: aarch64-unknown-linux-gnu, ext: tar.gz, compat: true }
-          - { os: macos-14,         target: aarch64-apple-darwin,      ext: tar.gz }
-          - { os: macos-15-intel,   target: x86_64-apple-darwin,       ext: tar.gz }
+          # macOS: onnxruntime's static library does not link (Apple Silicon) or does not exist (Intel); candle + Accelerate instead
+          - { os: macos-14,         target: aarch64-apple-darwin,      ext: tar.gz, features: accelerate }
+          - { os: macos-15-intel,   target: x86_64-apple-darwin,       ext: tar.gz, features: accelerate }
           - { os: windows-2022,     target: x86_64-pc-windows-msvc,    ext: zip }
     runs-on: ${{ matrix.os }}
     steps:
@@ -29,7 +30,7 @@ jobs:
         with:
           key: ${{ matrix.target }}
       - name: build
-        run: cargo build --release --locked -p terrabeam --target ${{ matrix.target }} ${{ matrix.compat && '--no-default-features' || '' }}
+        run: cargo build --release --locked -p terrabeam --target ${{ matrix.target }} ${{ (matrix.compat || matrix.features) && '--no-default-features' || '' }} ${{ matrix.features && format('--features {0}', matrix.features) || '' }}
       - name: package (unix)
         if: matrix.ext == 'tar.gz'
         shell: bash

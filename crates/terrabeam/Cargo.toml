@@ -27,3 +27,4 @@ bytes = "1"
 [features]
 default = ["ort"]
 ort = ["engram/ort"]
+accelerate = ["engram/accelerate"]
