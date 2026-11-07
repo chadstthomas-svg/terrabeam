@@ -26,6 +26,7 @@ pub struct Registry {
 
 const T2: &str = "tablinum/tablinum-2";
 const BET: &str = "tablinum/beam-engram-tables";
+const T3: &str = "tablinum/tablinum-3";
 
 pub fn builtin() -> Registry {
     let t = |repo: &str, path: &str, sha: &str, lic: &str| TableSrc {
@@ -51,12 +52,25 @@ pub fn builtin() -> Registry {
     ] {
         tables.insert(n.into(), t(T2, &format!("tables/{n}.tar"), sha, "CC BY 4.0 compilation (Tablinum-2; sources in SOURCES.md)"));
     }
-    let lite: Vec<String> = ["software", "sestem", "sehum", "humref", "sefin", "selaw", "uscode", "ecfr"].iter().map(|s| s.to_string()).collect();
-    let mut standard = lite.clone();
-    standard.extend(["law", "oer", "finreg", "eulex"].iter().map(|s| s.to_string()));
+    tables.insert("wiki".into(), t(T2, "tables/wiki.tar", "5df562a53e73e0b30da2958bfd3388970d9f8655656bedc2af214cedafeab6eb", "CC BY-SA 4.0 (English Wikipedia)"));
+    for (n, sha, lic) in [
+        ("apps", "3f99ae18ded1acf48dbd059265655e1f14ddde8688b1804370af07d375b8ba97", "per-source: CC BY 3.0/4.0, CC BY-SA 4.0, MPL 2.0, GFDL (see SOURCES.md)"),
+        ("web", "610ec7da34c8e8b7846fc1ec8f996946cd9553729d413b00fc22a31c3c1e097f", "per-source: W3C document/software licenses, Apache 2.0, MIT, CC0 (see SOURCES.md)"),
+        ("scicode", "5fa83af8fc85010d2ea09c3ca0fa3bdf5128904523b897c55c82d43ef7649015", "per-source: GFDL 1.3 (Rosetta Code), BSD-3 (SciPy docs) (see SOURCES.md)"),
+        ("homerepair", "4ce7eb729d0b93e519d53f2abcbb7758956d628efed504bc4187ffba7fa7e20b", "CC BY-SA 4.0 (Stack Exchange)"),
+        ("sedev", "2ada535c30fcbbd947cf954962ad6104ff52898a8a6a8ea79eea5163d536e6d0", "CC BY-SA 4.0 (Stack Exchange)"),
+        ("sesys", "6e8c5135d0151b1faa41b49b3e10b41094bd7446791bd5c725674dca86aea898", "CC BY-SA 4.0 (Stack Exchange)"),
+    ] {
+        tables.insert(n.into(), t(T3, &format!("tables/{n}.tar"), sha, lic));
+    }
+    // the Tablinum-3 data set's packs.json, mirrored as the offline fallback; packs nest: lite < standard < full
+    let v = |names: &[&str]| -> Vec<String> { names.iter().map(|s| s.to_string()).collect() };
     let mut packs = BTreeMap::new();
-    packs.insert("lite".into(), lite);
-    packs.insert("standard".into(), standard);
+    packs.insert("lite".into(), v(&["software", "apps", "web", "scicode", "sestem", "sehum", "humref", "sefin", "selaw", "uscode", "ecfr", "homerepair"]));
+    packs.insert("agent".into(), v(&["software", "apps", "web", "scicode", "sedev", "sesys"]));
+    packs.insert("standard".into(), v(&["software", "apps", "web", "scicode", "sestem", "sehum", "humref", "sefin", "selaw", "uscode", "ecfr", "homerepair", "law", "finreg", "eulex", "sedev", "sesys"]));
+    packs.insert("full".into(), v(&["software", "apps", "web", "scicode", "sestem", "sehum", "humref", "sefin", "selaw", "uscode", "ecfr", "homerepair", "law", "finreg", "eulex", "sedev", "sesys", "oer", "wiki"]));
+    packs.insert("wiki".into(), v(&["wiki"]));
     Registry { tables, packs, default_pack: "lite".into() }
 }
 
@@ -142,6 +156,16 @@ mod tests {
         }
         assert!(r.packs.contains_key(&r.default_pack));
         assert!(!r.tables.contains_key("health"), "health is not redistributable");
+    }
+
+    #[test]
+    fn packs_nest_and_never_ship_health() {
+        let r = builtin();
+        let has = |p: &str, q: &str| r.packs[p].iter().all(|t| r.packs[q].contains(t));
+        assert!(has("lite", "standard") && has("standard", "full") && has("agent", "standard"));
+        for t in ["health", "healthp", "fdalabel", "cdcj", "psych"] {
+            assert!(!r.tables.contains_key(t), "{t}: health data stays local");
+        }
     }
 
     #[test]
