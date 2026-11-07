@@ -10,8 +10,9 @@ regulations, open textbooks), passes the three best passages to the model, and t
 models are trained to read those passages and to say so when they don't contain the answer. Any other model gets the
 same passages as clearly marked sources.
 
-> **Preview.** The Moon-Beam 8B release and these tools are `-Preview` while Tablinum-3 (the next library) is being built
-> and tested. Everything here runs on Tablinum-2 today.
+> **Preview.** The Moon-Beam 8B release and these tools are `-Preview`. The library is now
+> [Tablinum-3](https://huggingface.co/datasets/tablinum/tablinum-3): 34 tables, 210M passages, with new agent tables
+> (app manuals, web and MCP specs, sysadmin and developer Q&A, scientific code) and home repair.
 
 ## Quick start
 
@@ -66,16 +67,20 @@ Step-by-step setup for **Open WebUI**, **LM Studio**, **Ollama**, **Claude Code*
 
 | Pack | Size | Tables |
 |---|---|---|
-| `lite` (default) | ~5 GB | software docs, Stack Exchange (STEM, humanities, finance, law), Britannica 1911, US Code, eCFR |
-| `standard` | ~21 GB | lite + case law, open textbooks, CRS reports, EUR-Lex |
-| `full` | ~54 GB | standard + English Wikipedia (when published to Tablinum-2) |
+| `lite` (default) | ~6.6 GB | software docs, app manuals (VS Code, PowerShell, Godot, Blender, LibreOffice, GIMP), web + MCP specs, scientific code, home repair, Stack Exchange (STEM, humanities, finance, law), Britannica 1911, US Code, eCFR |
+| `agent` | ~12.4 GB | software docs, app manuals, web + MCP specs, scientific code, developer and sysadmin Q&A (Stack Overflow tooling, Super User, Ask Ubuntu, Server Fault, Unix & Linux …) |
+| `standard` | ~31 GB | lite + case law, EUR-Lex, CRS reports, developer and sysadmin Q&A |
+| `full` | ~76 GB | standard + English Wikipedia + open textbooks |
+| `wiki` | ~34 GB | English Wikipedia only |
 
-Choose a pack with `--pack standard`, or pick tables with `--tables software,law`. `terrabeam pack lite` downloads a pack
-ahead of time.
+The packs nest (`lite` ⊂ `standard` ⊂ `full`), so moving up downloads only the difference. Choose a pack with
+`--pack standard`, or pick tables with `--tables software,law`. `terrabeam pack agent` downloads a pack ahead of time;
+`terrabeam mcp --pack agent` is the one to give a coding agent. The pack list is read from the published `packs.json`,
+so new tables arrive without a new terrabeam release.
 
 Every table keeps its own license (CC BY-SA, CC BY, public domain and others); see
-[Tablinum-2 SOURCES](https://huggingface.co/datasets/tablinum/tablinum-2/blob/main/SOURCES.md). The health tables are not
-redistributable, so they are never included in a pack.
+[Tablinum-3 SOURCES](https://huggingface.co/datasets/tablinum/tablinum-3/blob/main/SOURCES.md). Health text is never
+included in a pack, whatever its license.
 
 To turn the library off for one request, send `"engram": false` or the header `X-Engram: off`. To run without it, use
 `--no-engram`.
