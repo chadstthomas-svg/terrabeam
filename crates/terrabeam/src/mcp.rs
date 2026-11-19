@@ -2,7 +2,7 @@
 //! Claude Code, Claude Desktop, Cursor, Cline or opencode. Tools: `search_library` (+ `remember` / `recall` with --memory).
 //! The handshake is answered at once; the library loads in the background so a first-run pack download cannot time it out.
 
-use crate::{fetch, manifest::EngramSpec, memory, run::{load_library, LibArgs}};
+use crate::{fetch, libtools, manifest::EngramSpec, memory, run::{load_library, LibArgs}};
 use anyhow::Result;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -60,18 +60,7 @@ pub async fn mcp(a: McpArgs) -> Result<()> {
 }
 
 fn tools(mode: memory::Mode) -> Value {
-    let mut t = vec![json!({
-        "name": "search_library",
-        "description": "Search the Tablinum knowledge library (Wikipedia-style reference, law, software docs, research papers, Stack Exchange, open textbooks) and return the best passages for a question. Use a passage only if it states the answer.",
-        "inputSchema": {"type": "object", "properties": {"query": {"type": "string", "description": "the question, in plain words"}, "k": {"type": "integer", "minimum": 1, "maximum": 8, "description": "passages to return (default 3)"}}, "required": ["query"]}
-    })];
-    if mode != memory::Mode::Off {
-        t.push(json!({"name": "remember", "description": "Save a short note to the user's persistent memory (credentials are redacted).",
-            "inputSchema": {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]}}));
-        t.push(json!({"name": "recall", "description": "Find notes in the user's persistent memory that relate to a question.",
-            "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}));
-    }
-    Value::Array(t)
+    Value::Array(libtools::specs(mode).into_iter().map(|(n, d, sch)| json!({"name": n, "description": d, "inputSchema": sch})).collect())
 }
 
 fn text(s: String, is_error: bool) -> Value {
@@ -79,50 +68,27 @@ fn text(s: String, is_error: bool) -> Value {
 }
 
 async fn call(p: &Value, lib: &Arc<OnceCell<Result<Lib, String>>>, mem: &memory::Memory, k_default: usize) -> Result<Value, (i64, String)> {
-    let args = &p["arguments"];
-    match p["name"].as_str().unwrap_or("") {
-        "search_library" => {
-            let q = args["query"].as_str().unwrap_or("").trim().to_string();
-            if q.is_empty() {
-                return Ok(text("query is required".into(), true));
-            }
-            let k = args["k"].as_u64().map(|k| k.clamp(1, 8) as usize).unwrap_or(k_default);
-            // wait for the background load (first run may be downloading the pack)
-            let loaded = loop {
-                if let Some(r) = lib.get() {
-                    break r.clone();
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-            };
-            let (eg, tables) = match loaded {
-                Ok(Some(l)) => l,
-                Ok(None) => return Ok(text("the library is off (--no-engram)".into(), true)),
-                Err(e) => return Ok(text(format!("the library failed to load: {e}"), true)),
-            };
-            let r = tokio::task::spawn_blocking(move || eg.retrieve(&q, k, &tables.iter().map(|s| s.as_str()).collect::<Vec<_>>())).await;
-            match r {
-                Ok(Ok(hits)) if !hits.is_empty() => {
-                    let body: Vec<String> = hits
-                        .iter()
-                        .enumerate()
-                        .map(|(i, h)| format!("[{}] ({}{}) {}", i + 1, h.table, if h.passage.title.is_empty() { String::new() } else { format!(": {}", h.passage.title) }, h.passage.text))
-                        .collect();
-                    Ok(text(body.join("\n\n"), false))
-                }
-                Ok(Ok(_)) => Ok(text("no passages found".into(), false)),
-                Ok(Err(e)) => Ok(text(format!("search failed: {e:#}"), true)),
-                Err(e) => Ok(text(format!("search failed: {e}"), true)),
-            }
-        }
-        "remember" => {
-            let t = args["text"].as_str().unwrap_or("");
-            mem.add("default", "mcp", "user", t);
-            Ok(text("saved".into(), false))
-        }
-        "recall" => {
-            let notes = mem.recall("default", "mcp", args["query"].as_str().unwrap_or(""), &[], 8);
-            Ok(text(if notes.is_empty() { "no related notes".into() } else { notes.iter().map(|n| format!("- {}", n.text)).collect::<Vec<_>>().join("\n") }, false))
-        }
-        other => Err((-32602, format!("unknown tool: {other}"))),
+    let name = p["name"].as_str().unwrap_or("");
+    if !libtools::is_ours(name, mem.mode) {
+        return Err((-32602, format!("unknown tool: {name}")));
     }
+    let (eg, tables) = if name == libtools::SEARCH {
+        // wait for the background load (first run may be downloading the pack)
+        let loaded = loop {
+            if let Some(r) = lib.get() {
+                break r.clone();
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        };
+        match loaded {
+            Ok(Some((e, t))) => (Some(e), t),
+            Ok(None) => return Ok(text("the library is off (--no-engram)".into(), true)),
+            Err(e) => return Ok(text(format!("the library failed to load: {e}"), true)),
+        }
+    } else {
+        (None, vec![])
+    };
+    let ctx = libtools::Ctx { eg, tables: &tables, mem, user: "default", session: "mcp", k: k_default };
+    let (out, err, _) = libtools::exec(name, &p["arguments"], &ctx).await;
+    Ok(text(out, err))
 }

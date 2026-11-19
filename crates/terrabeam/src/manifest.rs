@@ -21,6 +21,47 @@ pub struct Manifest {
     pub sampling: BTreeMap<String, f64>,
     #[serde(default)]
     pub engram: Option<EngramSpec>,
+    /// the serving setup the model was trained in (terrabeam warns when it runs the model differently)
+    #[serde(default)]
+    pub harness: Option<HarnessSpec>,
+    /// LoRA adapters for this model, e.g. one per agent app (`terrabeam run <repo> --adapter opencode`)
+    #[serde(default)]
+    pub adapters: Vec<Adapter>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, Default)]
+pub struct HarnessSpec {
+    /// e.g. "tb1;inject=tablinum;k=3;tool=none;reasoning=keep" (proxy::harness_id)
+    #[serde(default)]
+    pub id: Option<String>,
+    /// offer the library as a tool the model calls itself (models trained with it)
+    #[serde(default)]
+    pub library_tool: bool,
+    /// give earlier reasoning back to the model when clients drop it (default on)
+    #[serde(default = "yes")]
+    pub keep_reasoning: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct Adapter {
+    pub name: String,
+    /// GGUF LoRA file in the repo
+    pub file: String,
+    pub bytes: u64,
+    #[serde(default)]
+    pub sha256: Option<String>,
+    /// harness id the adapter was trained in, when it differs from the model's
+    #[serde(default)]
+    pub harness: Option<String>,
+    #[serde(default = "one")]
+    pub scale: f32,
+    /// what the adapter is for (shown by --dry-run)
+    #[serde(default)]
+    pub description: String,
+}
+
+fn one() -> f32 {
+    1.0
 }
 
 impl Default for EngramSpec {

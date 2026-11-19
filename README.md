@@ -104,12 +104,49 @@ adds the matching notes to the system prompt.
   - `GET /memory` lists them, `DELETE /memory` clears them, and `DELETE /memory/<id>` removes one;
   - to skip memory for one request, send `"memory": false` or the header `X-Memory: off`.
 
+## Built for agents
+
+- **The model can search for itself.** With `--library-tool`, the model gets a `search_library` tool (plus `remember` and
+  `recall` with `--memory`). terrabeam runs those calls and keeps going until the model answers. Your app only sees
+  its own tools; a call to one of them comes back as usual, and each library search shows up as a line in the
+  reasoning stream. Turn it off for one request with `"library_tool": false` or the header `X-Library-Tool: off`.
+- **Reasoning is kept across turns.** Many apps drop the model's earlier reasoning when they send the next message.
+  Tablinum models are trained to see it, and multi-turn agent work falls apart without it: in tau2 airline tasks
+  Moon-Beam scored 0.71 with reasoning kept and 0.05 without. `terrabeam run` stores each answer's reasoning (and its
+  hidden library steps) for the conversation and puts it back when the app leaves it out (`--client-reasoning` turns
+  this off; for `proxy`, turn it on with `--keep-reasoning`).
+- **Adapters per app.** A model's `tablinum.json` can list LoRA adapters, for example one trained for a particular
+  agent app. `terrabeam run <model> --adapter <name>` loads it on top of the same GGUF.
+- **The harness has a version.** Every response carries `x-terrabeam-harness`, for example
+  `tb1;inject=tablinum;k=3;tool=none;reasoning=keep`: the injection layout, passages per question, library tool and
+  reasoning handling. When you run a model differently from how it was trained, terrabeam says so at startup.
+
+## Training data and evaluation in the same harness
+
+- **`--record DIR`** writes every exchange to `DIR/exchanges-<day>.jsonl`: the request as sent, every message the model
+  saw (passages, restored reasoning, library steps), its full answer with reasoning and tool calls, and the sources used.
+  It is opt-in and local; terrabeam never uploads it. User and conversation ids are stored as hashes, and exchanges that
+  used a health table are not written.
+- **`terrabeam env run`** runs a task file through the same proxy users get, grades each answer and writes a summary
+  with per-task solve rates (for calibrating a model before training it). Each task can be run in four variants:
+
+  | Variant | The model gets |
+  |---|---|
+  | `live` | the library as served (plus the library tool when on) |
+  | `oracle` | passages that contain the answer |
+  | `distract` | related passages that don't contain it |
+  | `closed` | no library |
+
+  Grading is correct +1, "I don't know" 0, wrong −1. Every proxy also serves `POST /env/render` and `POST /env/grade`,
+  so a trainer can use the exact prompts and rewards. Task format and the builder are in [envs/](envs/).
+
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `terrabeam run <model>` | Runs a model with the library and memory. Flags: `--quant`, `--pack`, `--tables`, `--memory`, `--no-engram`, `--cpu`, `--ctx`, `--port`, `-- <llama-server args>` |
-| `terrabeam proxy --upstream <url>` | Puts the library and memory in front of a server you already run |
+| `terrabeam run <model>` | Runs a model with the library and memory. Flags: `--quant`, `--pack`, `--tables`, `--memory`, `--no-engram`, `--library-tool`, `--client-reasoning`, `--adapter`, `--record`, `--cpu`, `--ctx`, `--port`, `-- <llama-server args>` |
+| `terrabeam proxy --upstream <url>` | Puts the library and memory in front of a server you already run (same flags; `--keep-reasoning` to restore reasoning) |
+| `terrabeam env run --tasks <file> --upstream <url>` | Runs tasks through the harness, grades them, and writes per-task solve rates |
 | `terrabeam mcp` | Runs the library (and `--memory`) as an MCP server on stdio |
 | `terrabeam pack <name>` | Downloads a pack ahead of time |
 | `terrabeam serve` | Runs the library as an HTTP service (`/search`, `/inject`); this is how Rig uses it |
@@ -129,7 +166,8 @@ adds the matching notes to the system prompt.
   - **Tablinum models:** in the exact layout they were trained on;
   - **other models:** as clearly marked source blocks.
 
-  Everything else is passed through unchanged, streaming included.
+  With `--library-tool`, the proxy also runs the model's library calls in a loop. Everything else is passed through
+  unchanged, streaming included.
 
 See [DESIGN.md](DESIGN.md) for details.
 

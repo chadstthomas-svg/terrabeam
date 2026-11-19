@@ -148,7 +148,16 @@ print("sources:", r.headers.get("x-engram-sources"))
 |---|---|---|
 | Library off for this request | `"engram": false` | `X-Engram: off` |
 | Memory off for this request | `"memory": false` | `X-Memory: off` |
-| Name the conversation (memory) | `"user": "<id>"` | `X-Session-Id`, `X-User-Id` |
+| Name the conversation (memory, restored reasoning) | `"user": "<id>"` | `X-Session-Id`, `X-User-Id` |
+| Library tool off for this request (when started with `--library-tool`) | `"library_tool": false` | `X-Library-Tool: off` |
+
+Response headers:
+- `x-engram-sources`: the passages added to the message;
+- `x-terrabeam-harness`: the serving setup (injection layout, passages, library tool, reasoning handling);
+- `x-terrabeam-restored`: how many earlier assistant turns got their reasoning (and library steps) back.
+
+Apps that drop earlier reasoning still get it back when they send a conversation id (`X-Session-Id`, OpenWebUI's
+forwarded chat id), or when the conversation's first message stays the same.
 
 Debugging:
 - `GET /engram/search?q=...` shows what the library returns.
