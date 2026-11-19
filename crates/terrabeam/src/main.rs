@@ -1,6 +1,11 @@
 //! terrabeam - one-command runner + engram service for Beam models. See DESIGN.md.
 //! `run` (one-command model runner) and `serve` (engram service; drop-in for Rig's router/engram_serve.py + POST /inject).
+mod assemble;
+mod env;
 mod fetch;
+mod history;
+mod libtools;
+mod record;
 mod hw;
 mod inject;
 mod manifest;
@@ -44,6 +49,17 @@ enum Cmd {
     Pack { name: String },
     /// Engram retrieval service: GET /health, GET /search?q=&k=&tables=, POST /inject
     Serve(ServeArgs),
+    /// Run tasks through the harness (score, calibrate, make training data): terrabeam env run --tasks t.jsonl ...
+    Env {
+        #[command(subcommand)]
+        cmd: EnvCmd,
+    },
+}
+
+#[derive(Subcommand)]
+enum EnvCmd {
+    /// every task x control x attempt through the same proxy users get; graded; summary + per-task solve rates
+    Run(env::EnvRunArgs),
 }
 
 #[derive(Parser, Clone)]
@@ -112,6 +128,7 @@ async fn main() -> Result<()> {
             Ok(())
         }
         Cmd::Serve(a) => serve(a).await,
+        Cmd::Env { cmd: EnvCmd::Run(a) } => env::env_run(a).await,
     }
 }
 

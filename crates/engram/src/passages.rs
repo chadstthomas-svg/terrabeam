@@ -31,6 +31,11 @@ struct PFile {
 
 type Group = Arc<Vec<Passage>>;
 
+/// Row groups kept per table. A group is 4096 passages (a few MB), and one is read for every hit that is not cached, so 512 per
+/// table let a `full` pack (30 tables) grow to tens of GB of RAM under a long run of searches (seen 11-18: 29.8 GB, OOM-killed).
+/// 32 per table bounds that to a few GB; agent loops and repeated questions still hit the cache.
+const GROUPS_CACHED: usize = 32;
+
 pub struct Passages {
     files: HashMap<i64, Arc<PFile>>,
     cache: Mutex<LruCache<(i64, usize), Group>>,
@@ -67,7 +72,7 @@ impl Passages {
                 files.entry(k).or_insert(f);
             }
         }
-        Ok(Passages { files, cache: Mutex::new(LruCache::new(NonZeroUsize::new(512).unwrap())) })
+        Ok(Passages { files, cache: Mutex::new(LruCache::new(NonZeroUsize::new(GROUPS_CACHED).unwrap())) })
     }
 
     pub fn len_files(&self) -> usize {

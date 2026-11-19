@@ -65,3 +65,23 @@ Target:
 ## Tests before release
 Linux here (CUDA A2000, CPU-only, Vulkan on the 2060); Windows + macOS on tailnet devices if available, else clean VMs. Parity: runner
 endpoint vs the eval harness on 100 EB items; Rust retrieval vs Python (above).
+
+## Harness for training (0.3.0, 11-18)
+Idea taken from harness adapters (RL'd LoRAs per agent harness, HF harness-hub 11-16): train a model in the exact harness it is
+served in. terrabeam is that harness for Beam models, so it gains what training needs:
+- **canonical history** (history.rs): per user + conversation, the model's real messages (reasoning, hidden library-tool steps) are
+  stored under keys from what the client received (tool-call ids, hash of the visible content) and put back when a client trims
+  them. On for `run`, opt-in for `proxy`. Motivation: Moon-Beam tau2 airline 0.711 with reasoning kept vs 0.045 as clients send it.
+- **library tool loop** (proxy.rs, libtools.rs): `search_library` (+ `remember` / `recall` with memory) offered as OpenAI tools;
+  terrabeam executes them and calls the model again (max `--max-steps`, the last call without its tools). Streaming forwards
+  content/reasoning deltas live and holds tool-call deltas; the client sees only its own tools (terrabeam's are dropped when the
+  model mixes both in one turn). The MCP server shares the same tool definitions and result layout.
+- **retrieval cache**: identical query + k returns the same passages (agent loops re-send the user turn on every call).
+- **harness id** `tb1;inject=<tablinum|sources|off>;k=<k>;tool=<library|none>;reasoning=<keep|client>`: response header, record
+  field, manifest `harness.id` (startup note when served differently). Manifest `adapters` + `--adapter` -> llama-server
+  `--lora-scaled file:scale`; an adapter may carry its own harness id.
+- **record** (record.rs): `--record DIR` -> one JSON line per exchange (request, trajectory incl. reasoning and tool steps, tools,
+  visible response, sources, usage). Local, opt-in, hashed ids, health-table exchanges skipped.
+- **env** (env.rs): `terrabeam env run` drives tasks through a private proxy (same code path) in four controls (live / oracle /
+  distract / closed), rule-graded (+1 / 0 / -1), summary with retrieval recall@3/@10 and per-task solve rates; `/env/render` and
+  `/env/grade` on every proxy for trainers. Task builder: envs/build_tasks.py.

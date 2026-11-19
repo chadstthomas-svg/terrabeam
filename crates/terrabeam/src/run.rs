@@ -4,7 +4,9 @@
 //! pinned upstream llama.cpp + the GGUF (+ MTP draft) -> llama-server on an internal port -> the proxy (engram + memory) on
 //! --port. proxy: the same proxy in front of a server you already run (Ollama, LM Studio, vLLM, llama.cpp, a cloud API).
 
-use crate::{fetch, hw, inject, manifest::{EngramSpec, Manifest, Quant}, memory, packs, proxy};
+use crate::history::History;
+use crate::record::Recorder;
+use crate::{fetch, hw, inject, manifest::{EngramSpec, HarnessSpec, Manifest, Quant}, memory, packs, proxy};
 use anyhow::{bail, Context, Result};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -45,6 +47,30 @@ pub struct LibArgs {
     pub memory: memory::Mode,
 }
 
+/// How the model is served beyond the library: its own library tool, preserved reasoning, recording.
+#[derive(clap::Args, Clone, Debug, Default)]
+pub struct HarnessArgs {
+    /// let the model search the library itself: a search_library tool (+ remember / recall with --memory) that terrabeam
+    /// runs; the client only sees its own tools (default: what the model's manifest says, else off)
+    #[arg(long)]
+    pub library_tool: bool,
+    #[arg(long, conflicts_with = "library_tool")]
+    pub no_library_tool: bool,
+    /// give earlier reasoning (and hidden library steps) back to the model when the client drops them
+    /// (default: on for `run`, off for `proxy`)
+    #[arg(long)]
+    pub keep_reasoning: bool,
+    #[arg(long, conflicts_with = "keep_reasoning")]
+    pub client_reasoning: bool,
+    /// most model calls per request when the library tool is on
+    #[arg(long, default_value_t = 6)]
+    pub max_steps: usize,
+    /// write every exchange, exactly as the model saw and produced it, to DIR/exchanges-<day>.jsonl (training data; local
+    /// only, never uploaded; exchanges that used health tables are skipped)
+    #[arg(long, value_name = "DIR")]
+    pub record: Option<PathBuf>,
+}
+
 #[derive(clap::Args, Clone, Debug)]
 pub struct RunArgs {
     /// tablinum/Moon-Beam-8B-A1B-GGUF-Preview, any HF repo with .gguf files (e.g. unsloth/Qwen3-8B-GGUF), a local folder with a
@@ -62,6 +88,11 @@ pub struct RunArgs {
     /// do not use the MTP draft head
     #[arg(long)]
     pub no_mtp: bool,
+    /// a LoRA adapter from the model's manifest (e.g. one trained for your agent app)
+    #[arg(long)]
+    pub adapter: Option<String>,
+    #[command(flatten)]
+    pub harness: HarnessArgs,
     /// ignore GPUs: CPU llama.cpp build, quant chosen for RAM
     #[arg(long)]
     pub cpu: bool,
@@ -92,6 +123,61 @@ pub struct ProxyArgs {
     pub port: u16,
     #[command(flatten)]
     pub lib: LibArgs,
+    #[command(flatten)]
+    pub harness: HarnessArgs,
+}
+
+/// (library tool, keep reasoning): flags first, then the model's manifest, then the command's default.
+fn harness_choice(h: &HarnessArgs, spec: Option<&HarnessSpec>, default_keep: bool) -> (bool, bool) {
+    let tool = if h.library_tool { true } else if h.no_library_tool { false } else { spec.map(|s| s.library_tool).unwrap_or(false) };
+    let keep = if h.keep_reasoning { true } else if h.client_reasoning { false } else { spec.map(|s| s.keep_reasoning).unwrap_or(default_keep) };
+    (tool, keep)
+}
+
+/// Build the proxy state: library, memory and the harness options (flags override the model's manifest).
+#[allow(clippy::too_many_arguments)]
+pub fn build_px(upstream: String, lib: Option<(Arc<engram::Engram>, Vec<String>)>, format: inject::Format, k: usize, model: String, mem: Arc<memory::Memory>, h: &HarnessArgs, spec: Option<&HarnessSpec>, default_keep: bool) -> Result<proxy::Px> {
+    let (tool, keep) = harness_choice(h, spec, default_keep);
+    let has_lib = lib.is_some();
+    let (eg, tables) = match lib {
+        Some((e, t)) => (Some(e), t),
+        None => (None, vec![]),
+    };
+    let mut px = proxy::Px::new(upstream, eg, tables, format, k, model, mem);
+    px.library_tool = tool && has_lib;
+    px.max_steps = h.max_steps.max(1);
+    px.history = keep.then(History::default);
+    px.recorder = match &h.record {
+        Some(d) => Some(Recorder::open(d.clone()).with_context(|| format!("--record {}", d.display()))?),
+        None => None,
+    };
+    px.harness = proxy::harness_id(has_lib.then_some(format), k, px.library_tool, keep);
+    if let Some(want) = spec.and_then(|s| s.id.as_deref()) {
+        if want != px.harness {
+            eprintln!("terrabeam: note - this model was trained in harness {want}; running it as {}", px.harness);
+        }
+    }
+    Ok(px)
+}
+
+/// A proxy on a free local port for `terrabeam env`: the same pipeline users get, with memory kept in `mem_home`.
+pub async fn start_proxy_for_env(upstream: &str, lib: &LibArgs, h: &HarnessArgs, mem_home: &Path) -> Result<(Arc<proxy::Px>, std::net::SocketAddr)> {
+    let c = fetch::client();
+    let home = fetch::home();
+    let up = upstream.trim_end_matches('/').trim_end_matches("/v1").to_string();
+    let spec = EngramSpec::default();
+    let loaded = load_library(&c, &home, lib, &spec).await?;
+    let (format, k) = fmt_of(lib, &spec);
+    std::fs::create_dir_all(mem_home)?;
+    let mem = Arc::new(memory::Memory::open(mem_home, lib.memory));
+    let px = Arc::new(build_px(up.clone(), loaded, format, k, format!("env -> {up}"), mem, h, None, true)?);
+    let l = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let addr = l.local_addr()?;
+    let app = proxy::router(px.clone());
+    tokio::spawn(async move {
+        axum::serve(l, app).await.ok();
+    });
+    Ok((px, addr))
 }
 
 /// Load the engram for these options (download the pack if needed). None when off.
@@ -152,10 +238,7 @@ pub async fn proxy_cmd(a: ProxyArgs) -> Result<()> {
     let lib = load_library(&c, &home, &a.lib, &spec).await?;
     let (format, k) = fmt_of(&a.lib, &spec);
     let mem = Arc::new(memory::Memory::open(&home, a.lib.memory));
-    let px = Arc::new(proxy::Px {
-        upstream: up.clone(), http: reqwest::Client::new(), eg: lib.as_ref().map(|l| l.0.clone()), tables: lib.as_ref().map(|l| l.1.clone()).unwrap_or_default(),
-        format, k, model: format!("proxy -> {up}"), mem, mem_k: 5,
-    });
+    let px = Arc::new(build_px(up.clone(), lib, format, k, format!("proxy -> {up}"), mem, &a.harness, None, false)?);
     serve_px(px, &a.host, a.port, None).await
 }
 
@@ -163,10 +246,14 @@ async fn serve_px(px: Arc<proxy::Px>, host: &str, port: u16, child: Option<&mut 
     let addr = format!("{host}:{port}");
     let l = tokio::net::TcpListener::bind(&addr).await.with_context(|| format!("bind {addr}"))?;
     eprintln!(
-        "\nterrabeam: ready at http://{addr}/v1  (OpenAI-compatible; {})\n  engram: {}\n  memory: {:?}\n  per request: \"engram\": false or header X-Engram: off; \"memory\": false or X-Memory: off; debug: GET /engram/search?q=...  GET /memory\n",
+        "\nterrabeam: ready at http://{addr}/v1  (OpenAI-compatible; {})\n  engram: {}\n  memory: {:?}\n  library tool: {}  reasoning: {}{}\n  harness: {}\n  per request: \"engram\": false or header X-Engram: off; \"memory\": false or X-Memory: off; \"library_tool\": false or X-Library-Tool: off; debug: GET /engram/search?q=...  GET /memory\n",
         px.model,
         if px.eg.is_some() { format!("on, {} tables ({}), {} passages per question, {:?} format", px.tables.len(), px.tables.join(","), px.k, px.format) } else { "off".into() },
-        px.mem.mode
+        px.mem.mode,
+        if px.library_tool { format!("on (up to {} model calls per request)", px.max_steps) } else { "off".into() },
+        if px.history.is_some() { "kept across turns" } else { "as the client sends it" },
+        if px.recorder.is_some() { "  recording: on" } else { "" },
+        px.harness
     );
     let app = proxy::router(px);
     match child {
@@ -196,8 +283,25 @@ pub async fn run(a: RunArgs) -> Result<()> {
         Some(n) => m.quant(n).with_context(|| format!("no quant {n} (have: {})", m.quants.iter().map(|q| q.name.as_str()).collect::<Vec<_>>().join(", ")))?.clone(),
         None => pick_quant(&m, &h).clone(),
     };
+    let ad = match &a.adapter {
+        Some(n) => Some(m.adapters.iter().find(|x| x.name.eq_ignore_ascii_case(n)).with_context(|| {
+            format!("no adapter {n} (have: {})", if m.adapters.is_empty() { "none".to_string() } else { m.adapters.iter().map(|x| x.name.as_str()).collect::<Vec<_>>().join(", ") })
+        })?.clone()),
+        None => None,
+    };
+    // an adapter trained in another harness brings its own harness settings
+    let adapter_harness: Option<HarnessSpec> = ad.as_ref().and_then(|x| x.harness.clone()).map(|id| HarnessSpec {
+        library_tool: id.contains("tool=library"),
+        keep_reasoning: !id.contains("reasoning=client"),
+        id: Some(id),
+    });
     if a.dry_run {
         let spec = m.engram.clone().unwrap_or_default();
+        if let Some(x) = &ad {
+            println!("adapter:  {} ({}, scale {}){}", x.name, x.file, x.scale, if x.description.is_empty() { String::new() } else { format!(" - {}", x.description) });
+        } else if !m.adapters.is_empty() {
+            println!("adapters: {} (--adapter NAME)", m.adapters.iter().map(|x| x.name.as_str()).collect::<Vec<_>>().join(", "));
+        }
         let (format, k) = fmt_of(&a.lib, &spec);
         println!("model:    {}\nquant:    {} ({}, {:.2} GB){}\nquants:   {}\nllama.cpp {} ({})\nengram:   {}\nmemory:   {:?}",
             m.name, q.name, q.file, q.bytes as f64 / 1e9,
@@ -206,6 +310,8 @@ pub async fn run(a: RunArgs) -> Result<()> {
             if m.llama_cpp.is_empty() { DEFAULT_LLAMA_TAG } else { &m.llama_cpp }, hw::llama_assets(&h, if m.llama_cpp.is_empty() { DEFAULT_LLAMA_TAG } else { &m.llama_cpp }).join(" + "),
             if a.lib.no_engram { "off".to_string() } else { format!("pack {} , {:?} format, k {}", a.lib.pack.clone().unwrap_or(spec.default_pack.clone()), format, k) },
             a.lib.memory);
+        let (tool, keep) = harness_choice(&a.harness, adapter_harness.as_ref().or(m.harness.as_ref()), true);
+        println!("harness:  {}", proxy::harness_id((!a.lib.no_engram).then_some(format), k, tool && !a.lib.no_engram, keep));
         return Ok(());
     }
     let gguf = files.get(&q, &c).await?;
@@ -213,6 +319,10 @@ pub async fn run(a: RunArgs) -> Result<()> {
     let mtp = match (&m.mtp, gpu && !a.no_mtp) {
         (Some(d), true) => Some((files.get_file(&d.file, Some(d.bytes), d.sha256.as_deref(), &c).await?, d.n_max)),
         _ => None,
+    };
+    let adapter = match &ad {
+        Some(x) => Some((x.name.clone(), files.get_file(&x.file, Some(x.bytes), x.sha256.as_deref(), &c).await?, x.scale)),
+        None => None,
     };
     let server = match &a.llama_server {
         Some(p) => p.clone(),
@@ -237,6 +347,9 @@ pub async fn run(a: RunArgs) -> Result<()> {
     if let Some((d, n)) = &mtp {
         args.extend(["-md".into(), d.to_string_lossy().into(), "-ngld".into(), "99".into(), "--spec-type".into(), "draft-mtp".into(),
             "--spec-draft-n-max".into(), n.to_string()]);
+    }
+    if let Some((_, f, scale)) = &adapter {
+        args.extend(["--lora-scaled".into(), format!("{}:{scale}", f.to_string_lossy())]);
     }
     args.extend(a.extra.iter().cloned());
     let logf = home.join("logs");
@@ -266,10 +379,11 @@ pub async fn run(a: RunArgs) -> Result<()> {
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
     let mem = Arc::new(memory::Memory::open(&home, a.lib.memory));
-    let px = Arc::new(proxy::Px {
-        upstream, http: reqwest::Client::new(), eg: lib.as_ref().map(|l| l.0.clone()), tables: lib.as_ref().map(|l| l.1.clone()).unwrap_or_default(),
-        format, k, model: format!("{} ({})", m.name, q.name), mem, mem_k: 5,
-    });
+    let label = match &adapter {
+        Some((n, _, _)) => format!("{} ({} + {n})", m.name, q.name),
+        None => format!("{} ({})", m.name, q.name),
+    };
+    let px = Arc::new(build_px(upstream, lib, format, k, label, mem, &a.harness, adapter_harness.as_ref().or(m.harness.as_ref()), true)?);
     let res = serve_px(px, &a.host, a.port, Some(&mut child)).await;
     child.kill().await.ok(); // also on SIGTERM: a stopped runner must not leave its llama-server behind
     res
@@ -369,6 +483,8 @@ fn generic_manifest(name: &str, quants: Vec<Quant>) -> Manifest {
         schema: 1, name: name.to_string(), llama_cpp: DEFAULT_LLAMA_TAG.into(), quants, mtp: None, context: 32768,
         sampling: Default::default(), // llama-server uses the model's own recommended sampling from the GGUF when present
         engram: Some(EngramSpec::default()),
+        harness: None,
+        adapters: vec![],
     }
 }
 
