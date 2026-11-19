@@ -33,8 +33,9 @@ type Group = Arc<Vec<Passage>>;
 
 /// Row groups kept per table. A group is 4096 passages (a few MB), and one is read for every hit that is not cached, so 512 per
 /// table let a `full` pack (30 tables) grow to tens of GB of RAM under a long run of searches (seen 11-18: 29.8 GB, OOM-killed).
-/// 32 per table bounds that to a few GB; agent loops and repeated questions still hit the cache.
-const GROUPS_CACHED: usize = 32;
+/// At 32 per table a 29-table server still held 11 GB after 255 searches; 8 keeps it to a few GB. Repeated questions (agent
+/// loops) are answered from the proxy's result cache and never reach this one.
+const GROUPS_CACHED: usize = 8;
 
 pub struct Passages {
     files: HashMap<i64, Arc<PFile>>,
