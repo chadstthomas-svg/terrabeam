@@ -92,7 +92,9 @@ terrabeam run tablinum/Moon-Beam-8B-A1B-GGUF-Preview --memory long-term
 ```
 
 With memory on, terrabeam saves short notes of your questions and the answers. When a later question relates to them, it
-adds the matching notes to the system prompt.
+adds the matching notes for the model: in front of the library passages for Tablinum models (as the user's own earlier
+words, never as a library source), otherwise in the system prompt. A note matches when it shares a distinctive word with
+the question, such as a name or place; common words like "what" or "my" don't count.
 
 - **Modes:**
   - `session`: this conversation only, useful when an app trims long chats;
