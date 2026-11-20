@@ -42,8 +42,22 @@ fn now() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
+/// Words that say nothing about which note is meant (question words, pronouns, auxiliaries, common verbs).
+const STOP: &[&str] = &[
+    "the", "and", "for", "are", "was", "were", "what", "which", "who", "whom", "whose", "when", "where", "why", "how", "that", "this",
+    "these", "those", "with", "from", "into", "about", "your", "you", "yours", "our", "ours", "mine", "his", "her", "hers", "its",
+    "their", "they", "them", "she", "him", "has", "have", "had", "does", "did", "doing", "not", "but", "can", "could", "would",
+    "should", "will", "shall", "may", "might", "must", "there", "here", "then", "than", "some", "any", "all", "one", "out", "get",
+    "got", "just", "also", "very", "really", "like", "know", "tell", "please", "kind", "thing", "things", "remember", "note",
+    "later", "again", "now", "today", "is", "my", "me", "it",
+];
+
 fn words(s: &str) -> HashSet<String> {
-    s.split(|c: char| !c.is_alphanumeric()).filter(|w| w.chars().count() > 2).map(|w| w.to_lowercase()).collect()
+    s.split(|c: char| !c.is_alphanumeric())
+        .filter(|w| w.chars().count() > 2)
+        .map(|w| w.to_lowercase())
+        .filter(|w| !STOP.contains(&w.as_str()))
+        .collect()
 }
 
 /// Rig's redaction: credentials never reach the memory file.
@@ -142,21 +156,34 @@ impl Memory {
         g.push(n);
     }
 
-    /// Notes for this question: shared words, newest first among equal scores; nothing already in the request.
+    /// Notes for this question, best first; nothing already in the request. A shared word counts 1 / (number of this user's
+    /// notes that contain it), common words not at all, and a note needs a score of 1: one word only it has (a name, a
+    /// place, "neighbour"), or two words it shares with one other note. (Was: two shared words of 3+ letters, "what" included,
+    /// which missed "What kind of animal is Bartek?" against "I have a greyhound called Bartek".)
     pub fn recall(&self, user: &str, session: &str, query: &str, in_context: &[String], limit: usize) -> Vec<Note> {
         if self.mode == Mode::Off || query.trim().is_empty() {
             return vec![];
         }
         let q = words(query);
         let g = self.notes.lock().unwrap();
-        let mut ranked: Vec<(usize, &Note)> = g
+        let pool: Vec<(&Note, HashSet<String>)> = g
             .iter()
             .filter(|n| n.user == user && (self.mode == Mode::LongTerm || n.session == session))
-            .filter(|n| !in_context.iter().any(|c| c.contains(n.text.trim())))
-            .map(|n| (words(&n.text).intersection(&q).count(), n))
-            .filter(|(s, _)| *s >= 2)
+            .map(|n| (n, words(&n.text)))
             .collect();
-        ranked.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.ts.cmp(&a.1.ts)));
+        let mut df: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+        for (_, ws) in &pool {
+            for w in ws.iter().filter(|w| q.contains(*w)) {
+                *df.entry(w.as_str()).or_default() += 1;
+            }
+        }
+        let mut ranked: Vec<(f32, &Note)> = pool
+            .iter()
+            .filter(|(n, _)| !in_context.iter().any(|c| c.contains(n.text.trim())))
+            .map(|(n, ws)| (ws.intersection(&q).map(|w| 1.0 / *df.get(w.as_str()).unwrap_or(&1) as f32).sum::<f32>(), *n))
+            .filter(|(s, _)| *s >= 0.999)
+            .collect();
+        ranked.sort_by(|a, b| b.0.total_cmp(&a.0).then(b.1.ts.cmp(&a.1.ts)));
         ranked.into_iter().take(limit).map(|(_, n)| n.clone()).collect()
     }
 
@@ -173,6 +200,19 @@ impl Memory {
         g.retain(|n| !(n.user == user && id.is_none_or(|i| n.id == i)));
         gone.len()
     }
+}
+
+/// Notes as reference passages, for models that read the Tablinum block: the user's own earlier words go in front of the
+/// library passages, where a trained model looks for the answer (in the system prompt a library passage about some other
+/// landlord won over "my landlord lives in Tallinn").
+pub fn as_passages(notes: &[Note]) -> Vec<String> {
+    notes
+        .iter()
+        .map(|n| {
+            let who = if n.role == "assistant" { "Your assistant answered earlier" } else { "You said earlier" };
+            format!("{who} (memory, not a library source): {}", n.text.replace('\n', " "))
+        })
+        .collect()
 }
 
 /// The block added to the system prompt (Rig's wording: memory is reference material, never instructions).
@@ -213,7 +253,17 @@ mod tests {
         assert_eq!(hit.len(), 1);
         let s = Memory { mode: Mode::Session, dir: home.join("memory"), notes: Mutex::new(m.list("u")) };
         assert!(s.recall("u", "s3", "Which GPU does my rig have, the A2000?", &[], 5).is_empty(), "session mode stays in its session");
-        assert_eq!(m.delete("u", None), 2);
+        // one distinctive word is enough; question words are not
+        m.add("u", "s4", "user", "I have a greyhound called Bartek.");
+        m.add("u", "s5", "user", "What's a good stretch for lower back pain?");
+        m.add("u", "s6", "user", "Note for later: my neighbour Bruno moved to Porto last spring.");
+        let b = m.recall("u", "s9", "What kind of animal is Bartek?", &[], 5);
+        assert_eq!(b.len(), 1, "{b:?}");
+        assert!(b[0].text.contains("greyhound"));
+        let n = m.recall("u", "s9", "What is my neighbour's name?", &[], 5);
+        assert!(n.len() == 1 && n[0].text.contains("Bruno"), "{n:?}");
+        assert!(m.recall("u", "s9", "What is the capital of France?", &[], 5).is_empty(), "no shared content word, no note");
+        assert_eq!(m.delete("u", None), 5);
         assert!(Memory::open(&home, Mode::LongTerm).list("u").is_empty(), "deletes survive a restart");
         std::fs::remove_dir_all(&home).ok();
     }

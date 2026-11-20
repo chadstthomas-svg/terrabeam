@@ -50,7 +50,7 @@ pub struct Px {
 impl Px {
     pub fn new(upstream: String, eg: Option<Arc<engram::Engram>>, tables: Vec<String>, format: inject::Format, k: usize, model: String, mem: Arc<memory::Memory>) -> Px {
         Px {
-            upstream, http: reqwest::Client::new(), eg, tables, format, k, model, mem, mem_k: 5, history: None, recorder: None,
+            upstream, http: reqwest::Client::new(), eg, tables, format, k, model, mem, mem_k: 3, history: None, recorder: None,
             library_tool: false, max_steps: 6, harness: String::new(), cache: Mutex::new((HashMap::new(), VecDeque::new())),
         }
     }
@@ -241,23 +241,32 @@ async fn chat(State(px): State<Arc<Px>>, headers: HeaderMap, body: axum::body::B
     let question = v["messages"].as_array().and_then(|m| inject::last_user(m)).map(|(_, q)| q);
     let mem_on = px.mem.mode != memory::Mode::Off && !is_off(&mflag, &mh);
     if let (Some(q), Some(msgs)) = (question.clone(), v.get_mut("messages").and_then(|m| m.as_array_mut())) {
-        // memory first (system prompt), then the engram (user message) - the memory never sees retrieved passages
-        if mem_on {
+        // memory is recalled first (it never sees retrieved passages). With the Tablinum layout the notes go in front of the
+        // library passages, where the model looks for answers; otherwise into the system prompt.
+        let notes = if mem_on {
             let ctx: Vec<String> = msgs.iter().map(|m| m["content"].to_string()).collect();
-            let notes = px.mem.recall(&user, &session, &q, &ctx, px.mem_k);
-            if !notes.is_empty() {
-                add_system(msgs, &memory::block(px.mem.mode, &notes));
-                extra.push(("x-terrabeam-memory", notes.len().to_string()));
-            }
+            px.mem.recall(&user, &session, &q, &ctx, px.mem_k)
+        } else {
+            vec![]
+        };
+        if !notes.is_empty() {
+            extra.push(("x-terrabeam-memory", notes.len().to_string()));
         }
+        let mut notes_placed = false;
         if let (Some(eg), false) = (px.eg.clone(), is_off(&flag, &eh)) {
             if let Some((i, _)) = inject::last_user(msgs) {
                 if let Some(hits) = retrieve(&px, eg, q.clone(), px.k).await.filter(|h| !h.is_empty()) {
-                    let srcs: Vec<inject::Src> = hits.iter().map(|h| inject::Src { table: &h.table, title: &h.passage.title, text: &h.passage.text }).collect();
+                    let note_texts = if px.format == inject::Format::Tablinum { memory::as_passages(&notes) } else { vec![] };
+                    let mut srcs: Vec<inject::Src> = note_texts.iter().map(|t| inject::Src { table: "memory", title: "", text: t }).collect();
+                    srcs.extend(hits.iter().map(|h| inject::Src { table: &h.table, title: &h.passage.title, text: &h.passage.text }));
                     inject::replace_text(msgs, i, inject::render(px.format, &q, &srcs, &inject::new_nonce()));
                     sources = hits.iter().map(|h| format!("{}:{}", h.table, h.pid)).collect();
+                    notes_placed = !note_texts.is_empty();
                 }
             }
+        }
+        if !notes.is_empty() && !notes_placed {
+            add_system(msgs, &memory::block(px.mem.mode, &notes));
         }
     }
     if !sources.is_empty() {
