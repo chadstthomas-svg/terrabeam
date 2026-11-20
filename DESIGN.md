@@ -85,3 +85,12 @@ served in. terrabeam is that harness for Beam models, so it gains what training 
 - **env** (env.rs): `terrabeam env run` drives tasks through a private proxy (same code path) in four controls (live / oracle /
   distract / closed), rule-graded (+1 / 0 / -1), summary with retrieval recall@3/@10 and per-task solve rates; `/env/render` and
   `/env/grade` on every proxy for trainers. Task builder: envs/build_tasks.py.
+
+## Candidate pool (0.3.0, 11-19)
+engram.py's first stage gives each table `ncand / n_tables` candidates (half vector, half BM25). Fine for 3-5 routed tables,
+but terrabeam serves whole packs without a router: 29 tables x ncand 48 -> one vector hit and NO BM25 per table. Recall of
+the gold answer on 200 tablinum-envs tasks (29 tables, crates/engram/examples/recall.rs, same cross-encoder for all):
+split48 r@3 53.5 / r@10 56.5 (29 cand/query); split192 84.0 / 87.5 (174); global g8-32-l1 82.0 / 85.5 (61); g16-64-l2 84.5 / 88.0 (122).
+Default is now `Pool::Global` (8 vector hits per table pooled, best 2/3 * ncand kept by inner product - one embedding model,
+so comparable - plus each table's top BM25 hit). End to end, Moon-Beam preview (Q4_K_M, tablinum-envs eval split, 2 attempts):
+live index +38.6 -> +46.1, and with --library-tool +34.1 -> +71.4 (correct 53.2% -> 83.4%).
