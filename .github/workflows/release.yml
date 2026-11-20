@@ -2,6 +2,12 @@ name: release
 on:
   push:
     tags: ["v*"]
+  # rebuild an existing release's assets (e.g. a runner image was retired): gh workflow run release.yml -f tag=v0.3.0
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: existing tag to build and attach assets to
+        required: true
 permissions:
   contents: write
 jobs:
@@ -17,12 +23,16 @@ jobs:
           - { os: ubuntu-22.04,     target: x86_64-unknown-linux-gnu,  ext: tar.gz, compat: true }
           - { os: ubuntu-22.04-arm, target: aarch64-unknown-linux-gnu, ext: tar.gz, compat: true }
           # macOS: onnxruntime's static library does not link (Apple Silicon) or does not exist (Intel); candle + Accelerate instead
-          - { os: macos-14,         target: aarch64-apple-darwin,      ext: tar.gz, features: accelerate }
+          - { os: macos-15,         target: aarch64-apple-darwin,      ext: tar.gz, features: accelerate }
           - { os: macos-15-intel,   target: x86_64-apple-darwin,       ext: tar.gz, features: accelerate }
           - { os: windows-2022,     target: x86_64-pc-windows-msvc,    ext: zip }
     runs-on: ${{ matrix.os }}
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -35,7 +45,7 @@ jobs:
         if: matrix.ext == 'tar.gz'
         shell: bash
         run: |
-          f=terrabeam-${GITHUB_REF_NAME}-${{ matrix.target }}${{ matrix.compat && '-compat' || '' }}.tar.gz
+          f=terrabeam-${TAG}-${{ matrix.target }}${{ matrix.compat && '-compat' || '' }}.tar.gz
           cp target/${{ matrix.target }}/release/terrabeam .
           tar -czf $f terrabeam LICENSE README.md
           (command -v sha256sum >/dev/null && sha256sum $f || shasum -a 256 $f) > $f.sha256
@@ -44,7 +54,7 @@ jobs:
         if: matrix.ext == 'zip'
         shell: pwsh
         run: |
-          $f = "terrabeam-$env:GITHUB_REF_NAME-${{ matrix.target }}.zip"
+          $f = "terrabeam-$env:TAG-${{ matrix.target }}.zip"
           Copy-Item target/${{ matrix.target }}/release/terrabeam.exe .
           Compress-Archive -Path terrabeam.exe, LICENSE, README.md -DestinationPath $f
           "$((Get-FileHash $f -Algorithm SHA256).Hash.ToLower())  $f" | Out-File -Encoding ascii "$f.sha256"
@@ -52,7 +62,8 @@ jobs:
       - name: upload
         uses: softprops/action-gh-release@v2
         with:
-          prerelease: ${{ contains(github.ref_name, '-') }}
+          tag_name: ${{ env.TAG }}
+          prerelease: ${{ contains(env.TAG, '-') }}
           files: |
             ${{ env.ASSET }}
             ${{ env.ASSET }}.sha256
