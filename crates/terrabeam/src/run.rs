@@ -42,6 +42,10 @@ pub struct LibArgs {
     /// passages per question
     #[arg(long)]
     pub k: Option<usize>,
+    /// first-stage candidates: "global" (best vector hits pooled across tables + each table's top BM25 hit) or "split"
+    /// (0.2.x: the budget divided evenly between tables, which starves large libraries)
+    #[arg(long, default_value = "global", value_parser = ["global", "split"])]
+    pub pool: String,
     /// persistent memory: off, session (this conversation) or long-term (every conversation of the user)
     #[arg(long, value_enum, default_value = "off")]
     pub memory: memory::Mode,
@@ -212,12 +216,16 @@ pub async fn load_library(c: &reqwest::Client, home: &Path, lib: &LibArgs, spec:
     let (ncand, nprobe) = (spec.ncand, spec.nprobe);
     let t0 = Instant::now();
     let ts = tables.clone();
+    let pool = lib.pool.clone();
     let e = tokio::task::spawn_blocking(move || -> Result<engram::Engram> {
         let names: Vec<&str> = ts.iter().map(|s| s.as_str()).collect();
         let mut e = engram::Engram::open(&root, &names, &emb.join("0_StaticEmbedding"), nprobe, ncand)?;
         let threads = std::thread::available_parallelism().map(|n| n.get().clamp(2, 8)).unwrap_or(4);
         e.rerank = Some(engram::rerank::CrossEncoder::open_with(&ce, true, threads)?);
         e.confident_at = 0.85;
+        if pool == "split" {
+            e.pool = engram::Pool::Split;
+        }
         Ok(e)
     })
     .await??;

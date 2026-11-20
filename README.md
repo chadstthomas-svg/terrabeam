@@ -161,6 +161,10 @@ adds the matching notes to the system prompt.
   - a MiniLM cross-encoder through ONNX Runtime.
 
   Results match the reference Python implementation (rerank top-1 on 60 of 60 test queries), and it runs about 3× faster.
+- **Candidates across many tables:** each search pools the best vector hits from every table (they share one embedding
+  model, so their scores compare) and adds each table's top keyword hit, then re-ranks. Earlier versions divided a fixed
+  budget evenly between tables, which with a 29-table library left one candidate per table. On 200 library questions the
+  answer reached the top 3 passages 82% of the time, up from 54%. `--pool split` restores the old behavior.
 - **Models:** run by the pinned upstream llama.cpp release. The MTP draft head is used when the model ships one.
 - **Proxy:** adds passages to the last user message:
   - **Tablinum models:** in the exact layout they were trained on;

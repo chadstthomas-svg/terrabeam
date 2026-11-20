@@ -985,6 +985,7 @@ dependencies = [
  "serde_json",
  "tantivy",
  "tokenizers 0.22.2",
+ "unicode-normalization",
 ]
 
 [[package]]

@@ -36,8 +36,27 @@ pub struct Hit {
     pub passage: passages::Passage,
 }
 
+/// How the first stage spends its candidate budget across tables.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Pool {
+    /// engram.py: `ncand / n_tables` per table, half vector, half BM25. Starves big libraries (29 tables, ncand 48 -> one
+    /// vector hit and no BM25 per table): recall@3 53.5% on 200 tablinum-envs tasks.
+    Split,
+    /// `vec_per_table` vector hits from every table pooled, best `vec_keep` by inner product, plus each table's top
+    /// `lex_per_table` BM25 hits: recall@3 82.0% on the same tasks at 61 candidates per query (11-19).
+    Global { vec_per_table: usize, vec_keep: usize, lex_per_table: usize },
+}
+
+impl Pool {
+    /// The default for a candidate budget: 8 vector hits per table, 2/3 of `ncand` kept, one BM25 hit per table.
+    pub fn global(ncand: usize) -> Pool {
+        Pool::Global { vec_per_table: 8, vec_keep: (ncand * 2 / 3).max(16), lex_per_table: 1 }
+    }
+}
+
 pub struct Engram {
     pub tables: BTreeMap<String, Table>,
+    pub pool: Pool,
     pub embed: embed::StaticEmbed,
     pub nprobe: usize,
     pub ncand: usize,
@@ -63,10 +82,46 @@ impl Engram {
             );
         }
         let embed = embed::StaticEmbed::open(embed_dir, 256)?;
-        Ok(Engram { tables: out, embed, nprobe, ncand, rerank: None, confident_at: 0.0 })
+        Ok(Engram { tables: out, pool: Pool::global(ncand), embed, nprobe, ncand, rerank: None, confident_at: 0.0 })
+    }
+
+    /// First stage across many tables without starving them (`Pool::Global`): every table's top `vec_per_table` vector hits
+    /// are pooled and the best `vec_keep` by inner product kept (one embedding model, so the scores compare across tables),
+    /// plus each table's top `lex_per_table` BM25 hits (BM25 scores do not compare across tables, so per table).
+    pub fn candidates_global(&self, q: &str, tables: &[&str], vec_per_table: usize, vec_keep: usize, lex_per_table: usize) -> Result<Vec<Candidate>> {
+        let qv = self.embed.embed(q)?;
+        let ts: Vec<&Table> = tables.iter().filter_map(|t| self.tables.get(*t)).collect();
+        let mut vec: Vec<Candidate> = Vec::new();
+        for t in &ts {
+            for (s, id) in t.ivf.search(&qv, vec_per_table, self.nprobe) {
+                if id >= 0 {
+                    vec.push(Candidate { table: t.name.clone(), pid: id, first: s, lexical: false });
+                }
+            }
+        }
+        vec.sort_by(|a, b| b.first.total_cmp(&a.first));
+        vec.truncate(vec_keep);
+        let mut seen: HashSet<(String, i64)> = vec.iter().map(|c| (c.table.clone(), c.pid)).collect();
+        if lex_per_table > 0 && !q.trim().is_empty() {
+            for t in &ts {
+                let Some(b) = t.bm25.as_ref() else { continue };
+                let mut n = 0;
+                for (s, pid) in b.search(q, lex_per_table * 3)? {
+                    if n >= lex_per_table {
+                        break;
+                    }
+                    if seen.insert((t.name.clone(), pid)) {
+                        vec.push(Candidate { table: t.name.clone(), pid, first: s, lexical: true });
+                        n += 1;
+                    }
+                }
+            }
+        }
+        Ok(vec)
     }
 
     /// engram.py `candidates`: per table m = ncand / n_tables, of which m/2 from BM25 (de-duplicated against the vector hits).
+    /// With many tables this starves each one (29 tables, ncand 48 -> one vector hit and no BM25 per table); see `Pool`.
     pub fn candidates(&self, q: &str, n: usize, tables: &[&str]) -> Result<Vec<Candidate>> {
         let qv = self.embed.embed(q)?;
         let ts: Vec<&Table> = tables.iter().filter_map(|t| self.tables.get(*t)).collect();
@@ -130,12 +185,15 @@ impl Engram {
         Ok(Some(best.iter().map(|c| self.fetch(c)).collect::<Result<Vec<_>>>()?))
     }
 
-    /// engram.py `retrieve` (after the confident lane): hybrid candidates -> passages -> cross-encoder re-rank -> top k.
+    /// engram.py `retrieve` (after the confident lane): hybrid candidates (see `Pool`) -> passages -> cross-encoder re-rank -> top k.
     pub fn retrieve(&self, q: &str, k: usize, tables: &[&str]) -> Result<Vec<Hit>> {
         if let Some(h) = self.retrieve_fast(q, k, tables)? {
             return Ok(h);
         }
-        let cand = self.candidates(q, self.ncand, tables)?;
+        let cand = match self.pool {
+            Pool::Split => self.candidates(q, self.ncand, tables)?,
+            Pool::Global { vec_per_table, vec_keep, lex_per_table } => self.candidates_global(q, tables, vec_per_table, vec_keep, lex_per_table)?,
+        };
         let mut hits = cand.iter().map(|c| self.fetch(c)).collect::<Result<Vec<_>>>()?;
         if let (Some(ce), false) = (&self.rerank, hits.is_empty()) {
             let texts: Vec<&str> = hits.iter().map(|h| h.passage.text.as_str()).collect();

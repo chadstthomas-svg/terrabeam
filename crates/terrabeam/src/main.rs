@@ -91,6 +91,9 @@ struct ServeArgs {
     /// ms-marco-MiniLM-L6-v2 snapshot folder (onnx/model.onnx -> onnxruntime, else candle)
     #[arg(long, env = "CE_DIR")]
     ce_dir: PathBuf,
+    /// first-stage candidates: global (pooled across tables) or split (0.2.x, budget divided per table)
+    #[arg(long, env = "POOL", default_value = "global", value_parser = ["global", "split"])]
+    pool: String,
     /// /search text cap in characters (engram_serve.py TEXT_CAP); /inject always uses full passages
     #[arg(long, default_value_t = 1400)]
     text_cap: usize,
@@ -153,6 +156,9 @@ async fn serve(a: ServeArgs) -> Result<()> {
             let mut eg = engram::Engram::open(&a2.root, &names, &a2.embed_dir, a2.nprobe, a2.ncand)?;
             eg.rerank = Some(engram::rerank::CrossEncoder::open_with(&a2.ce_dir, true, a2.threads)?);
             eg.confident_at = a2.confident_at;
+            if a2.pool == "split" {
+                eg.pool = engram::Pool::Split;
+            }
             Ok(eg)
         })();
         match r {

@@ -27,3 +27,6 @@ default = ["ort"]
 ort = ["dep:ort"]
 # Apple Accelerate BLAS for the candle reranker (macOS builds, which use candle instead of onnxruntime)
 accelerate = ["candle-core/accelerate", "candle-nn/accelerate", "candle-transformers/accelerate"]
+
+[dev-dependencies]
+unicode-normalization = "0.1"
