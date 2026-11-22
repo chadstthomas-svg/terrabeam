@@ -62,7 +62,7 @@ The client's `Authorization` header is passed through to the upstream server.
 claude mcp add tablinum -- terrabeam mcp --pack lite
 ```
 
-Claude gets a `search_library` tool. With `--memory long-term` it also gets `remember` and `recall`. The first start
+Claude gets a `search_library` tool (and `library_tables`, which lists what the library holds). With `--memory long-term` it also gets `remember` and `recall`. The first start
 downloads the pack in the background.
 
 ## Claude Desktop

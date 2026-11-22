@@ -121,6 +121,10 @@ pub struct ProxyArgs {
     /// http://127.0.0.1:1234 (LM Studio), http://127.0.0.1:8000 (vLLM); with or without /v1
     #[arg(long)]
     pub upstream: String,
+    /// send memory notes to an upstream that is not on this machine or a private network (off by default: notes are personal,
+    /// and a cloud API would receive them inside the prompt). Library passages are public and always allowed.
+    #[arg(long)]
+    pub allow_remote_memory: bool,
     #[arg(long, default_value = "127.0.0.1")]
     pub host: String,
     #[arg(long, default_value_t = 8090)]
@@ -245,7 +249,12 @@ pub async fn proxy_cmd(a: ProxyArgs) -> Result<()> {
     let spec = EngramSpec::default();
     let lib = load_library(&c, &home, &a.lib, &spec).await?;
     let (format, k) = fmt_of(&a.lib, &spec);
-    let mem = Arc::new(memory::Memory::open(&home, a.lib.memory));
+    let mut mode = a.lib.memory;
+    if mode != memory::Mode::Off && !a.allow_remote_memory && !is_private_upstream(&up) {
+        eprintln!("terrabeam: memory is OFF for this proxy: {up} is not on this machine or a private network, and memory notes are personal.\n  Pass --allow-remote-memory to send them anyway.");
+        mode = memory::Mode::Off;
+    }
+    let mem = Arc::new(memory::Memory::open(&home, mode));
     let px = Arc::new(build_px(up.clone(), lib, format, k, format!("proxy -> {up}"), mem, &a.harness, None, false)?);
     serve_px(px, &a.host, a.port, None).await
 }
@@ -604,5 +613,52 @@ mod tests {
             vec!["Q4/m-Q4_K_M-00001-of-00003.gguf", "Q4/m-Q4_K_M-00002-of-00003.gguf", "Q4/m-Q4_K_M-00003-of-00003.gguf"]
         );
         assert_eq!(split_parts("m-Q8_0.gguf"), vec!["m-Q8_0.gguf"]);
+    }
+}
+
+/// True when the upstream is this machine or a private network: loopback, RFC 1918, CGNAT 100.64/10 (Tailscale), link-local,
+/// IPv6 ULA, or a local-only name (localhost, *.local, *.lan, *.internal, *.home.arpa, *.ts.net, single-label hosts).
+/// Port of Rig's private-tool guard: personal data never goes to a paid or cloud backend by default.
+pub fn is_private_upstream(url: &str) -> bool {
+    let rest = url.split_once("://").map(|(_, r)| r).unwrap_or(url);
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let hostport = authority.rsplit_once('@').map(|(_, h)| h).unwrap_or(authority);
+    let host = if let Some(h) = hostport.strip_prefix('[') { h.split(']').next().unwrap_or("") } else { hostport.rsplit_once(':').map(|(h, p)| if p.chars().all(|c| c.is_ascii_digit()) { h } else { hostport }).unwrap_or(hostport) };
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
+    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        return match ip {
+            std::net::IpAddr::V4(v) => {
+                let o = v.octets();
+                v.is_loopback() || v.is_private() || v.is_link_local() || v.is_unspecified() || (o[0] == 100 && (o[1] & 0xc0) == 64)
+            }
+            std::net::IpAddr::V6(v) => {
+                let s0 = v.segments()[0];
+                v.is_loopback() || v.is_unspecified() || (s0 & 0xfe00) == 0xfc00 || (s0 & 0xffc0) == 0xfe80
+                    || v.to_ipv4_mapped().map(|m| m.is_loopback() || m.is_private()).unwrap_or(false)
+            }
+        };
+    }
+    !host.is_empty()
+        && (host == "localhost" || !host.contains('.')
+            || [".localhost", ".local", ".lan", ".internal", ".home.arpa", ".ts.net"].iter().any(|s| host.ends_with(s)))
+}
+
+#[cfg(test)]
+mod private_upstream_tests {
+    use super::is_private_upstream as p;
+    #[test]
+    fn local_and_private() {
+        for u in ["http://127.0.0.1:8080", "http://localhost:11434/v1", "http://192.168.1.20:1234", "http://10.0.0.5", "http://172.20.1.1:8000",
+                  "http://100.101.2.3:8080", "http://[::1]:8080", "http://[fd12::1]:9000", "http://gpu-box:8000", "http://rig.tail9467e2.ts.net:8443",
+                  "http://nas.local:8080", "https://user:pw@127.0.0.1:8443/v1"] {
+            assert!(p(u), "{u} should be private");
+        }
+    }
+    #[test]
+    fn remote() {
+        for u in ["https://api.openai.com", "https://openrouter.ai/api", "http://8.8.8.8:8080", "http://172.32.0.1", "http://100.128.0.1",
+                  "https://example.com:8443/v1", "http://[2001:db8::1]:80"] {
+            assert!(!p(u), "{u} should be remote");
+        }
     }
 }

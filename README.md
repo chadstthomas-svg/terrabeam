@@ -105,6 +105,8 @@ the question, such as a name or place; common words like "what" or "my" don't co
   - notes are plain JSONL under `~/.cache/terrabeam/memory/`;
   - `GET /memory` lists them, `DELETE /memory` clears them, and `DELETE /memory/<id>` removes one;
   - to skip memory for one request, send `"memory": false` or the header `X-Memory: off`.
+  - `terrabeam proxy` keeps memory off when the upstream is not on your machine or a private network (a cloud API would
+    receive your notes inside the prompt); `--allow-remote-memory` turns it back on. Library passages are always allowed.
 
 ## Built for agents
 
@@ -147,9 +149,9 @@ the question, such as a name or place; common words like "what" or "my" don't co
 | Command | What it does |
 |---|---|
 | `terrabeam run <model>` | Runs a model with the library and memory. Flags: `--quant`, `--pack`, `--tables`, `--memory`, `--no-engram`, `--library-tool`, `--client-reasoning`, `--adapter`, `--record`, `--cpu`, `--ctx`, `--port`, `-- <llama-server args>` |
-| `terrabeam proxy --upstream <url>` | Puts the library and memory in front of a server you already run (same flags; `--keep-reasoning` to restore reasoning) |
+| `terrabeam proxy --upstream <url>` | Puts the library and memory in front of a server you already run (same flags; `--keep-reasoning` to restore reasoning; `--allow-remote-memory` for a non-local upstream) |
 | `terrabeam env run --tasks <file> --upstream <url>` | Runs tasks through the harness, grades them, and writes per-task solve rates |
-| `terrabeam mcp` | Runs the library (and `--memory`) as an MCP server on stdio |
+| `terrabeam mcp` | Runs the library (and `--memory`) as an MCP server on stdio (tools: `search_library`, `library_tables`, and `remember` / `recall` with memory) |
 | `terrabeam pack <name>` | Downloads a pack ahead of time |
 | `terrabeam serve` | Runs the library as an HTTP service (`/search`, `/inject`); this is how Rig uses it |
 

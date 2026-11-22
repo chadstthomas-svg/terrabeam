@@ -59,8 +59,14 @@ pub async fn mcp(a: McpArgs) -> Result<()> {
     Ok(())
 }
 
+/// MCP-only helper (Rig's knowledge_tables): which tables the library holds, so an agent knows when searching is worth it.
+/// Not part of the proxy's tool loop, whose tool set is the layout models are trained on.
+const TABLES_TOOL: &str = "library_tables";
+
 fn tools(mode: memory::Mode) -> Value {
-    Value::Array(libtools::specs(mode).into_iter().map(|(n, d, sch)| json!({"name": n, "description": d, "inputSchema": sch})).collect())
+    let mut t: Vec<Value> = libtools::specs(mode).into_iter().map(|(n, d, sch)| json!({"name": n, "description": d, "inputSchema": sch})).collect();
+    t.push(json!({"name": TABLES_TOOL, "description": "List the tables in the Tablinum knowledge library that search_library searches.", "inputSchema": {"type": "object", "properties": {}}}));
+    Value::Array(t)
 }
 
 fn text(s: String, is_error: bool) -> Value {
@@ -69,10 +75,10 @@ fn text(s: String, is_error: bool) -> Value {
 
 async fn call(p: &Value, lib: &Arc<OnceCell<Result<Lib, String>>>, mem: &memory::Memory, k_default: usize) -> Result<Value, (i64, String)> {
     let name = p["name"].as_str().unwrap_or("");
-    if !libtools::is_ours(name, mem.mode) {
+    if !libtools::is_ours(name, mem.mode) && name != TABLES_TOOL {
         return Err((-32602, format!("unknown tool: {name}")));
     }
-    let (eg, tables) = if name == libtools::SEARCH {
+    let (eg, tables) = if name == libtools::SEARCH || name == TABLES_TOOL {
         // wait for the background load (first run may be downloading the pack)
         let loaded = loop {
             if let Some(r) = lib.get() {
@@ -88,6 +94,9 @@ async fn call(p: &Value, lib: &Arc<OnceCell<Result<Lib, String>>>, mem: &memory:
     } else {
         (None, vec![])
     };
+    if name == TABLES_TOOL {
+        return Ok(text(if tables.is_empty() { "the library has no tables loaded".into() } else { tables.join("\n") }, false));
+    }
     let ctx = libtools::Ctx { eg, tables: &tables, mem, user: "default", session: "mcp", k: k_default };
     let (out, err, _) = libtools::exec(name, &p["arguments"], &ctx).await;
     Ok(text(out, err))
