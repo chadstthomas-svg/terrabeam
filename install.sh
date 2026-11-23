@@ -29,4 +29,4 @@ tar -xzf "$tmp/$f" -C "$tmp"
 mkdir -p "$BIN" && mv "$tmp/terrabeam" "$BIN/terrabeam" && chmod +x "$BIN/terrabeam"
 echo "terrabeam $tag installed to $BIN/terrabeam"
 case ":$PATH:" in *":$BIN:"*) ;; *) echo "add it to your PATH:  export PATH=\"$BIN:\$PATH\"" ;; esac
-echo "next:  terrabeam run tablinum/Moon-Beam-8B-A1B-GGUF-Preview"
+echo "next:  terrabeam run tablinum/Moon-Beam-8B-A1B-GGUF"
