@@ -5,7 +5,7 @@ talk to "an OpenAI-compatible server" can use it, and agent apps that support MC
 
 | Setup | Command | Endpoint |
 |---|---|---|
-| Run a model with terrabeam | `terrabeam run tablinum/Moon-Beam-8B-A1B-GGUF-Preview` | `http://127.0.0.1:8080/v1` |
+| Run a model with terrabeam | `terrabeam run tablinum/Moon-Beam-8B-A1B-GGUF` | `http://127.0.0.1:8080/v1` |
 | Keep your current server, add the library | `terrabeam proxy --upstream <your server>` | `http://127.0.0.1:8090/v1` |
 | Library as an MCP tool | `terrabeam mcp` | stdio (configured in the app) |
 
@@ -18,7 +18,7 @@ on another machine.
 
 1. Start terrabeam:
    - For OpenWebUI running on the same machine, natively:
-     `terrabeam run tablinum/Moon-Beam-8B-A1B-GGUF-Preview --memory long-term`.
+     `terrabeam run tablinum/Moon-Beam-8B-A1B-GGUF --memory long-term`.
    - For OpenWebUI in Docker, add `--host 0.0.0.0`.
 2. In Open WebUI, open **Admin Panel → Settings → Connections**. Under **OpenAI API**, click **+** and enter:
    - **URL:** `http://localhost:8080/v1`. From Docker, use `http://host.docker.internal:8080/v1`.

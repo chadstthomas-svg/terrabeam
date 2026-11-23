@@ -20,4 +20,4 @@ if ($want.ToLower() -ne $got) { throw "terrabeam: checksum mismatch (expected $w
 Expand-Archive -Force $zip $dir
 $p = [Environment]::GetEnvironmentVariable("Path", "User")
 if ($p -notlike "*$dir*") { [Environment]::SetEnvironmentVariable("Path", "$p;$dir", "User"); Write-Host "added $dir to your PATH (open a new terminal)" }
-Write-Host "terrabeam $tag installed. Next:  terrabeam run tablinum/Moon-Beam-8B-A1B-GGUF-Preview"
+Write-Host "terrabeam $tag installed. Next:  terrabeam run tablinum/Moon-Beam-8B-A1B-GGUF"

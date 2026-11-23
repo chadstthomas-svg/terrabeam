@@ -77,7 +77,7 @@ pub struct HarnessArgs {
 
 #[derive(clap::Args, Clone, Debug)]
 pub struct RunArgs {
-    /// tablinum/Moon-Beam-8B-A1B-GGUF-Preview, any HF repo with .gguf files (e.g. unsloth/Qwen3-8B-GGUF), a local folder with a
+    /// tablinum/Moon-Beam-8B-A1B-GGUF, any HF repo with .gguf files (e.g. unsloth/Qwen3-8B-GGUF), a local folder with a
     /// tablinum.json, or a local .gguf file
     pub model: String,
     #[arg(long, default_value = "127.0.0.1")]

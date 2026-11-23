@@ -10,7 +10,7 @@ regulations, open textbooks), passes the three best passages to the model, and t
 models are trained to read those passages and to say so when they don't contain the answer. Any other model gets the
 same passages as clearly marked sources.
 
-> **Preview.** The Moon-Beam 8B release and these tools are `-Preview`. The library is now
+> **Moon-Beam 8B is out of preview:** `tablinum/Moon-Beam-8B-A1B-GGUF` (old `-Preview` links redirect). The library is now
 > [Tablinum-3](https://huggingface.co/datasets/tablinum/tablinum-3): 34 tables, 210M passages, with new agent tables
 > (app manuals, web and MCP specs, sysadmin and developer Q&A, scientific code) and home repair.
 
@@ -32,7 +32,7 @@ cargo install --git https://github.com/chadstthomas-svg/terrabeam terrabeam
 **2. Run a model**
 
 ```sh
-terrabeam run tablinum/Moon-Beam-8B-A1B-GGUF-Preview
+terrabeam run tablinum/Moon-Beam-8B-A1B-GGUF
 ```
 
 That one command:
@@ -55,7 +55,7 @@ The response header `x-engram-sources` lists the passages the model was given.
 
 | You have… | Run | Then point your app at |
 |---|---|---|
-| A Tablinum model | `terrabeam run tablinum/<model>-GGUF-Preview` | `http://127.0.0.1:8080/v1` |
+| A Tablinum model | `terrabeam run tablinum/<model>-GGUF` | `http://127.0.0.1:8080/v1` |
 | Any GGUF on Hugging Face | `terrabeam run unsloth/Qwen3-8B-GGUF` (or a local `.gguf`) | `http://127.0.0.1:8080/v1` |
 | Ollama, LM Studio, vLLM, llama.cpp, a cloud API | `terrabeam proxy --upstream http://127.0.0.1:11434` | `http://127.0.0.1:8090/v1` |
 | Claude Code, Claude Desktop, Cursor, Cline, opencode | `terrabeam mcp` (an MCP tool: `search_library`) | see the guide |
@@ -88,7 +88,7 @@ To turn the library off for one request, send `"engram": false` or the header `X
 ## Memory
 
 ```sh
-terrabeam run tablinum/Moon-Beam-8B-A1B-GGUF-Preview --memory long-term
+terrabeam run tablinum/Moon-Beam-8B-A1B-GGUF --memory long-term
 ```
 
 With memory on, terrabeam saves short notes of your questions and the answers. When a later question relates to them, it
